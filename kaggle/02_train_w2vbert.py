@@ -242,11 +242,36 @@ processor.save_pretrained(OUTDIR)
 from datasets import Audio, interleave_datasets, load_dataset
 
 
+# datasets >= 4 decodes Audio columns through torchcodec, which pins against specific torch
+# builds and needs FFmpeg present. On a machine we don't control that is a dependency we can
+# lose a run to — it raised ImportError on Lightning with torch 2.8. Ask datasets for raw bytes
+# (Audio(decode=False)) and decode with soundfile, which we already depend on.
+def decode_audio_cell(cell) -> np.ndarray:
+    """An undecoded datasets audio cell -> 16 kHz mono float32."""
+    import io
+
+    import soundfile as sf
+
+    if isinstance(cell, dict) and cell.get("array") is not None:   # already decoded upstream
+        wav = np.asarray(cell["array"], dtype=np.float32)
+        sr = int(cell.get("sampling_rate") or 16000)
+    else:
+        raw = cell["bytes"] if isinstance(cell, dict) else cell
+        wav, sr = sf.read(io.BytesIO(raw), dtype="float32")
+    if wav.ndim > 1:
+        wav = wav.mean(axis=1)
+    if sr != 16000:
+        import librosa
+
+        wav = librosa.resample(wav, orig_sr=sr, target_sr=16000)
+    return wav.astype(np.float32)
+
+
 def build(split: str):
     parts, probs = [], []
     for lang, cfg in HF_CONFIGS.items():
         ds = load_dataset("google/WaxalNLP", cfg, split=split, streaming=True)
-        ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+        ds = ds.cast_column("audio", Audio(decode=False))   # decode_audio_cell() resamples
         if split == "train":
             ds = ds.shuffle(seed=SEED, buffer_size=1500)
         parts.append(ds)
@@ -257,7 +282,7 @@ def build(split: str):
 
 
 def prepare(batch: dict) -> dict:
-    wav = np.asarray(batch["audio"]["array"], dtype=np.float32)
+    wav = decode_audio_cell(batch["audio"])
     feats = feature_extractor(wav, sampling_rate=16000)
     batch["input_features"] = feats.input_features[0]
     batch["labels"] = tokenizer(fold_rare(normalise(batch["transcription"]), allowed)).input_ids

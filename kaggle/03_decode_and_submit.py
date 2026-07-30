@@ -255,6 +255,32 @@ def logits_for(wavs: list[np.ndarray]) -> list[np.ndarray]:
 from datasets import Audio, load_dataset
 import evaluate
 
+
+# datasets >= 4 decodes Audio columns through torchcodec, which pins against specific torch
+# builds and needs FFmpeg present. On a machine we don't control that is a dependency we can
+# lose a run to — it raised ImportError on Lightning with torch 2.8. Ask datasets for raw bytes
+# (Audio(decode=False)) and decode with soundfile, which we already depend on.
+def decode_audio_cell(cell) -> np.ndarray:
+    """An undecoded datasets audio cell -> 16 kHz mono float32."""
+    import io
+
+    import soundfile as sf
+
+    if isinstance(cell, dict) and cell.get("array") is not None:   # already decoded upstream
+        wav = np.asarray(cell["array"], dtype=np.float32)
+        sr = int(cell.get("sampling_rate") or 16000)
+    else:
+        raw = cell["bytes"] if isinstance(cell, dict) else cell
+        wav, sr = sf.read(io.BytesIO(raw), dtype="float32")
+    if wav.ndim > 1:
+        wav = wav.mean(axis=1)
+    if sr != 16000:
+        import librosa
+
+        wav = librosa.resample(wav, orig_sr=sr, target_sr=16000)
+    return wav.astype(np.float32)
+
+
 wer_metric, cer_metric = evaluate.load("wer"), evaluate.load("cer")
 N_TUNE = 150
 
@@ -263,10 +289,10 @@ for lang, cfg in HF_CONFIGS.items():
     if lang not in lm_paths:
         continue
     ds = load_dataset("google/WaxalNLP", cfg, split="validation", streaming=True)
-    ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+    ds = ds.cast_column("audio", Audio(decode=False))       # see decode_audio_cell()
     wavs, refs = [], []
     for row in ds:
-        w = np.asarray(row["audio"]["array"], dtype=np.float32)
+        w = decode_audio_cell(row["audio"])
         if not (1.0 * 16000 <= len(w) <= MAX_SECONDS * 16000):
             continue
         wavs.append(w)
@@ -408,11 +434,11 @@ if missing:
         ds = load_dataset("google/WaxalNLP", cfg, split="test", streaming=True)
         # RULES GUARD: never read labels from the test split.
         ds = ds.remove_columns([c for c in ("transcription", "text") if c in ds.column_names])
-        ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+        ds = ds.cast_column("audio", Audio(decode=False))   # see decode_audio_cell()
         for row in ds:
             rid = str(row["id"])
             if rid in missing and rid not in audio_store:
-                audio_store[rid] = np.asarray(row["audio"]["array"], dtype=np.float32)
+                audio_store[rid] = decode_audio_cell(row["audio"])
                 known_lang.setdefault(rid, lang)
 print(f"resolved {len(audio_store):,} / {len(needed):,}")
 
