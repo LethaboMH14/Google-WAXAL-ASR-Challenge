@@ -108,12 +108,33 @@ INDOMAIN_REPEAT = 10
 #     WAXAL_INCLUDE_FLEURS=1 python kaggle/00_build_lm_corpus.py
 INCLUDE_AUDIO_DATASETS = os.getenv("WAXAL_INCLUDE_FLEURS", "0") == "1"
 
+# Wikipedia + MasakhaNEWS alone left Luganda at 28.5% of the published corpus size and Lingala at
+# 51.9% — Luganda being exactly the language where the published LM gain is largest (-59% rel).
+# HPLT 2.0 and GlotCC are cleaned, language-identified web crawls that both carry all three of our
+# languages and are both **CC0-1.0**, i.e. public domain, which is the cleanest thing we can put in
+# the disclosure. HPLT lug_Latn alone is 21,276 documents / 40 MB of Luganda.
+#
+# Rejected after checking, so nobody re-proposes them:
+#   castorini/afriberta-corpus  12 languages, none of ours. No Luganda at all.
+#   masakhane/mafand            CC-BY-NC-4.0. Non-commercial, on a $10k-prize entry, for a few
+#                               thousand news sentences. Not worth the licence question.
+#   statmt/cc100                has lg + ln, but the HF card licence is literally "unknown", and
+#                               "must be legally licensed" is a stated rule. CC0 sources cover it.
+#   google/fleurs               audio dataset — see audio_heavy below.
+#
+# `max_words` bounds a source so a web crawl cannot run away with the wall clock. Streaming order
+# is deterministic, so a cap stays reproducible — which the rules require ("rerunning your model
+# should always place you at the same position"). 12M is above every published corpus size below.
 SOURCES: dict[str, list[dict]] = {
     "lin": [
         {"repo": "wikimedia/wikipedia", "config": "20231101.ln", "split": "train", "col": "text",
          "licence": "CC-BY-SA-4.0"},
         {"repo": "masakhane/masakhanews", "config": "lin", "split": "train", "col": "text",
          "licence": "AFL-3.0"},
+        {"repo": "HPLT/HPLT2.0_cleaned", "config": "lin_Latn", "split": "train", "col": "text",
+         "licence": "CC0-1.0", "max_words": 12_000_000},
+        {"repo": "cis-lmu/GlotCC-V1", "config": "lin-Latn", "split": "train", "col": "content",
+         "licence": "CC0-1.0", "max_words": 12_000_000},
         {"repo": "google/fleurs", "config": "ln_cd", "split": "train", "col": "transcription",
          "licence": "CC-BY-4.0", "audio_heavy": True},
     ],
@@ -122,6 +143,10 @@ SOURCES: dict[str, list[dict]] = {
          "licence": "CC-BY-SA-4.0"},
         {"repo": "masakhane/masakhanews", "config": "sna", "split": "train", "col": "text",
          "licence": "AFL-3.0"},
+        {"repo": "HPLT/HPLT2.0_cleaned", "config": "sna_Latn", "split": "train", "col": "text",
+         "licence": "CC0-1.0", "max_words": 12_000_000},
+        {"repo": "cis-lmu/GlotCC-V1", "config": "sna-Latn", "split": "train", "col": "content",
+         "licence": "CC0-1.0", "max_words": 12_000_000},
         {"repo": "google/fleurs", "config": "sn_zw", "split": "train", "col": "transcription",
          "licence": "CC-BY-4.0", "audio_heavy": True},
     ],
@@ -130,6 +155,10 @@ SOURCES: dict[str, list[dict]] = {
          "licence": "CC-BY-SA-4.0"},
         {"repo": "masakhane/masakhanews", "config": "lug", "split": "train", "col": "text",
          "licence": "AFL-3.0"},
+        {"repo": "HPLT/HPLT2.0_cleaned", "config": "lug_Latn", "split": "train", "col": "text",
+         "licence": "CC0-1.0", "max_words": 12_000_000},
+        {"repo": "cis-lmu/GlotCC-V1", "config": "lug-Latn", "split": "train", "col": "content",
+         "licence": "CC0-1.0", "max_words": 12_000_000},
         {"repo": "google/fleurs", "config": "lg_ug", "split": "train", "col": "transcription",
          "licence": "CC-BY-4.0", "audio_heavy": True},
     ],
@@ -248,8 +277,13 @@ for lang in LANGS:
             continue
         try:
             from datasets import load_dataset
+            # Print BEFORE the work, not after. GlotCC has 1,255 configs and HPLT 191, so just
+            # resolving the data files for one of them can take minutes with nothing on stdout —
+            # which is indistinguishable from a hang, and cost us a run once already.
+            print(f"  {tag:<42}: resolving...", flush=True)
             ds = load_dataset(src["repo"], src["config"], split=src["split"], streaming=True)
-            got, words = 0, 0
+            cap = src.get("max_words")
+            got, words, capped = 0, 0, False
             for row in ds:
                 raw = row.get(src["col"])
                 if not raw:
@@ -261,9 +295,13 @@ for lang in LANGS:
                     lines.append(s)
                     got += 1
                     words += len(s.split())
-            print(f"  {tag:<42}: {got:,} sentences, {words:,} words")
+                if cap and words >= cap:
+                    capped = True
+                    break
+            print(f"  {tag:<42}: {got:,} sentences, {words:,} words"
+                  f"{'  (hit max_words cap)' if capped else ''}")
             used.append({"source": tag, "sentences": got, "words": words,
-                         "repeated": 1, "licence": src["licence"]})
+                         "repeated": 1, "licence": src["licence"], "capped": capped})
         except Exception as e:                                  # noqa: BLE001
             # Non-fatal by design: a renamed config must not cost us the other sources.
             print(f"  {tag:<42}: FAILED — {type(e).__name__}: {str(e)[:140]}")

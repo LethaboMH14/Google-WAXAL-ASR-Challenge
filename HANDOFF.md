@@ -26,10 +26,12 @@ The scripts detect where they're running and resolve paths themselves — the sa
 Lightning, on Kaggle, and on your laptop. You do not edit paths. If Kaggle ever unblocks, the
 Kaggle runbook still works unchanged.
 
-**Pick an L4, not a T4.** On Lightning they cost about the same per hour (~$0.70 vs ~$0.68) but
-the L4 is roughly double the throughput, has 24 GB instead of 16 GB, and supports bf16 natively.
-The T4 is Turing — no bf16 — so training silently falls back to fp16, which works but is less
-stable. Same money, better machine, fewer hours burnt. See §4 for the credit budget.
+**Pick a T4.** (This used to say "pick an L4, not a T4" — that was written off Lightning's
+onboarding shortlist, before we saw the real price list. It was wrong.) Actual rates: T4 **0.19
+credits/hr**, L4 **1.58**. The L4 gives about 1.9× the throughput for 8.3× the price, so it is
+the worst value on the menu. 15 credits = **79 T4-hours** vs 9.5 L4-hours. Yes, the T4 is Turing
+and has no bf16, so training falls back to fp16 — slightly less stable, and a trivial price to pay
+at that ratio. See §4.
 
 Everything else is already done: the data is downloaded and profiled, the plan is decided and
 written up, and all six scripts are written, corrected against the real data, and compiling.
@@ -194,23 +196,32 @@ consequences you need to hold onto while you run this:
 
 ### The credit budget — read this before you start a GPU
 
-You have **15 credits/month ≈ 21 hours on an L4** (~$0.70/hr). The plan needs about 11:
+You have **15 credits/month = 79 hours on a T4** (0.19 credits/hr). The plan needs about 21:
 
 | Stage | Machine | Time | Credits |
 |---|---|---|---|
-| 0 — LM corpus | **CPU** | ~30 min | ~0 |
-| 1 — MMS baseline | L4 | ~1 h | ~0.7 |
-| 2 — fine-tune | L4 | ~8 h | ~5.6 |
-| 3 — KenLM decode | L4 | ~2 h | ~1.4 |
-| **Total** | | **~11 h** | **~7.7** |
+| 0 — LM corpus | **CPU** | ~10-20 min | ~0 |
+| 1 — MMS baseline | T4 | ~1 h | ~0.2 |
+| 2 — fine-tune | T4 | ~16 h | ~3.0 |
+| 3 — KenLM decode | T4 | ~4 h | ~0.8 |
+| **Total** | | **~21 h** | **~4.0** |
 
-That leaves roughly 7 credits of margin — enough for one failed stage 2, and not much more.
-**So: never leave a GPU Studio idle.** Lightning bills wall-clock, not utilisation. Stop the
-machine the moment a stage finishes. This is the single easiest way to lose the competition
-to something that isn't a modelling mistake.
+**Credits are not the constraint. The calendar is.** ~4 of 15 leaves room for three or four
+complete re-runs; nothing buys back days before the 3 Aug close. Lightning still bills wall-clock
+rather than utilisation, so stop a Studio when a stage finishes — but an idle hour now costs 0.19
+credits, not an existential slice of the budget. Optimise the schedule, not the spend.
 
-If you are running low, the fallback in §5 (skip stage 2) costs ~3 credits total and still
-gets a real score on the board.
+Two operational facts that will bite you on stage 2:
+
+- **Free Studios stop every 4 hours** and need a manual restart. Stage 2 is ~16 h, so expect
+  three or four interruptions. This is normal. Re-run the same command and it resumes from the
+  last checkpoint on persistent storage.
+- **Auto-sleep after 10 minutes of inactivity.** Fine while a stage is running; it's the gap
+  between stages that catches people.
+
+If the calendar tightens, the escape hatch is an **H100 at 4.50 credits/hr with no queue** —
+stage 2 in ~2 h for ~9 credits. Most of the month's allowance in one afternoon, and the right
+call if it's the difference between submitting a fine-tuned model and not.
 
 ---
 
@@ -223,11 +234,10 @@ prints `env=lightning work=... zindi=...` as its first line; **if that first lin
 
 **Don't waste credits on stage 0 — it is CPU-only.** Switch the Studio to CPU for it.
 
-> **If you run short on credits:** stage 2 is 70% of the budget and it is the *optional* part.
-> The biggest measured win in this whole plan is the KenLM shallow fusion in stage 3 (~59%
-> relative WER cut on Luganda and Shona), not the fine-tune. Stage 1 + stage 3 pointed at the
-> baseline model is ~3 credits and still puts a real score on the board. Tell me and I'll wire
-> the switch — it's a one-flag change, not a rewrite.
+> **"Skip stage 2 to save credits" was removed.** It made sense against a 9.5-hour L4 budget.
+> On a T4 stage 2 costs ~3 credits of 15 — run it. The skip-stage-2 path (stage 1 + stage 3
+> against the baseline model) still exists as a *schedule* fallback if you run out of days, and
+> it is a one-flag change if you need it; it is no longer a budget decision.
 
 ### Stage 0 — `kaggle/00_build_lm_corpus.py` · **CPU session** · 0 GPU-hours
 
@@ -245,7 +255,7 @@ that output and send it to me. If Luganda says TOO SMALL, tell me before you go 
 
 `lm_sources.json` is also our rules-required disclosure of external data. Don't delete it.
 
-### Stage 1 — `kaggle/01_baseline_submission.py` · **L4** · ~1 h · ~0.7 credits
+### Stage 1 — `kaggle/01_baseline_submission.py` · **T4** · ~1 h · ~0.2 credits
 
 Zero-shot `facebook/mms-1b-all` with its per-language adapters. No training. The point is to
 get a real score on the board today and to prove the whole pipeline works — audio resolution →
@@ -260,7 +270,7 @@ language routing → decode → submission format — **before** we spend 8 GPU-
 
 Download the CSV, validate it (§6), submit it. **That's our first score.**
 
-### Stage 2 — `kaggle/02_train_w2vbert.py` · **L4** · ~8 h · ~5.6 credits
+### Stage 2 — `kaggle/02_train_w2vbert.py` · **T4** · ~16 h · ~3.0 credits
 
 The actual model: `facebook/w2v-bert-2.0` (580M) fine-tuned as one shared multilingual CTC
 model over all three languages. **This is 70% of your credit budget — read §4 first.**
@@ -278,7 +288,7 @@ Watch the first 50 steps. **Loss must be a finite number and must come down.** I
 `inf` or `nan`, stop the run and message me — that means the CTC label-length filter is wrong
 for some batch and burning 8 hours on it is pointless.
 
-### Stage 3 — `kaggle/03_decode_and_submit.py` · **L4** · ~2 h · ~1.4 credits
+### Stage 3 — `kaggle/03_decode_and_submit.py` · **T4** · ~4 h · ~0.8 credits
 
 Builds a 5-gram KenLM per language from the stage-0 corpora, then decodes the fine-tuned model
 with `pyctcdecode` beam search + shallow fusion. **This is where the big win is** — published
@@ -404,7 +414,7 @@ And the thing that unblocks you:
     succeeded instead of silently falling through to greedy decoding.
   - `scripts/setup_lightning.sh` + `requirements-gpu.txt` are new — Kaggle preinstalls this
     stack, Lightning doesn't.
-  - The credit budget is real and tight: **~7.7 of your 15 credits** for the full plan. §4 has
+  - Credits are comfortable, the calendar is not: **~4 of your 15 credits** for the full plan. §4 has
     the table. The one way to blow it is leaving a GPU Studio idle.
 
 Good catches. Keep doing that.
@@ -422,8 +432,8 @@ Good catches. Keep doing that.
 | Closes | 3 Aug 2026 |
 | Limits | 5 submissions/day, 200 total, team of 4 |
 | Compute | Lightning AI free plan — 15 credits/month, no card, no phone |
-| GPU | **L4** (~$0.70/h, bf16, 24 GB). Not T4 — same price, half the speed |
+| GPU | **T4** (0.19 credits/h, 16 GB, fp16). Not L4 — 8.3× the price for 1.9× the speed |
 | Working dir | `/teamspace/studios/this_studio/waxal-work/` — persistent, shared by all stages |
 | Seed | 1337 everywhere — never change it |
-| Total GPU | ~11 h ≈ 7.7 of your 15 credits |
-| Biggest risk | Leaving a GPU Studio idle. Billing is wall-clock, not utilisation |
+| Total GPU | ~21 h ≈ 4.0 of your 15 credits (T4 @ 0.19/hr) |
+| Biggest risk | Running out of **calendar**, not credits. Free Studios also stop every 4 h |

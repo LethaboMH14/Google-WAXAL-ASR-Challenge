@@ -132,7 +132,7 @@ verification neither builder could complete — a human blocker, not a technical
 
 | Option | GPU | Cost | Notes |
 |---|---|---|---|
-| **Lightning AI** | L4 | free | 15 credits/mo ≈ 21 L4-hours. Persistent disk. **Default.** |
+| **Lightning AI** | T4 | free | 15 credits/mo ≈ **79 T4-hours**. Persistent disk. **Default.** |
 | Kaggle | 2×T4 | free | 30 GPU-h/week, more than enough — but phone-verification gated |
 | Colab free | 1×T4 | free | 12 h cap, 90-min idle kill, no background exec. Stages 1 and 3 only |
 | SageMaker Studio Lab | T4 | free | **Dead** — new signups closed 30 Jul 2026 |
@@ -147,28 +147,37 @@ section and constrains what the *solution depends on* (paid APIs, AutoML), not w
 GPU — otherwise nobody with a personal GPU could enter. We stay on free tiers anyway; there is
 no reason to test the boundary for a few hours of compute.
 
-**Why L4 and not T4.** On Lightning they cost roughly the same per hour (~$0.70 vs ~$0.68), but
-the L4 is about double the throughput, has 24 GB rather than 16 GB, and supports bf16 natively.
-T4 is Turing, so it has no bf16 and training falls back to fp16 — workable, less stable. Same
-credits, better machine.
+**Use the T4, not the L4** — corrected once we saw Lightning's actual price list rather than the
+onboarding shortlist. Per hour: T4 **0.19 credits**, L4 **1.58**. The L4 is roughly 1.9× a T4's
+throughput for **8.3×** the price, which makes it the worst value on the menu. 15 credits buys
+**79 T4-hours** against 9.5 L4-hours. T4 is Turing so it has no bf16 and training falls back to
+fp16 — workable, marginally less stable, and worth it at this price ratio.
 
-Budget against the 15 free credits:
+Budget against the 15 free credits, at 0.19 credits/hr:
 
 | Stage | Script | Machine | Credits |
 |---|---|---|---|
 | LM text corpora | `kaggle/00_build_lm_corpus.py` | CPU | **~0** |
-| Zero-shot baseline → first valid submission | `kaggle/01_baseline_submission.py` | L4 ~1 h | ~0.7 |
-| Multilingual w2v-bert-2.0 CTC fine-tune | `kaggle/02_train_w2vbert.py` | L4 ~8 h | ~5.6 |
-| LM build + beam decode + LID + final submission | `kaggle/03_decode_and_submit.py` | L4 ~2 h | ~1.4 |
-| **Total** | | **~11 h** | **~7.7** |
+| Zero-shot baseline → first valid submission | `kaggle/01_baseline_submission.py` | T4 ~1 h | ~0.2 |
+| Multilingual w2v-bert-2.0 CTC fine-tune | `kaggle/02_train_w2vbert.py` | T4 ~16 h | ~3.0 |
+| LM build + beam decode + LID + final submission | `kaggle/03_decode_and_submit.py` | T4 ~4 h | ~0.8 |
+| **Total** | | **~21 h** | **~4.0** |
 
-That leaves ~7 credits — one failed stage 2, and not much else. Lightning bills wall-clock, not
-utilisation, so an idle Studio is the cheapest way to lose this competition to something that
-isn't a modelling mistake.
+**The binding constraint is wall-clock, not credits.** ~4 of 15 credits leaves room for three or
+four full re-runs; what you cannot buy back is the calendar before the 3 Aug close. Plan the
+schedule, not the budget. Lightning still bills wall-clock rather than utilisation, so an idle
+Studio is pure waste — just no longer an existential one.
 
-**If credits run short, drop stage 2.** It is 70% of the budget and it is the optional part: the
-dominant measured lever is the KenLM shallow fusion in stage 3 (~59% relative WER cut on lug/sna),
-not the fine-tune. Stage 1 + stage 3 against the baseline model is ~3 credits and still scores.
+Consequently **"drop stage 2 to save credits" is dead** and has been removed. It was written
+against a 9.5-hour L4 budget. Stage 2 now costs ~3 credits of 15; run it.
+
+If the *calendar* gets tight rather than the credits, the escape hatch is an **H100 at 4.50/hr,
+zero queue** — stage 2 in ~2 h for ~9 credits. That is the one situation where spending most of
+the month's allowance in an afternoon is the right call.
+
+**Free Studios stop every 4 hours and need a manual restart**, and auto-sleep after 10 minutes of
+inactivity. Stage 2 is ~16 h on a T4, so it *will* be interrupted several times — this is expected,
+not a failure. Stage 2 checkpoints to persistent storage and resumes by simply being run again.
 
 The local machine's job is orchestration, data inspection and submission validation only.
 
@@ -180,9 +189,9 @@ The local machine's job is orchestration, data inspection and submission validat
 0. git clone + bash scripts/setup_lightning.sh   (once, on a CPU Studio)
 1. python local/inspect_data.py                  (locally — confirms the data profile)
 2. python kaggle/00_build_lm_corpus.py           (CPU Studio — no credits burned)
-3. python kaggle/01_baseline_submission.py       (L4 — get a score on the board today)
-4. python kaggle/02_train_w2vbert.py             (L4 — the actual model; re-run to resume)
-5. python kaggle/03_decode_and_submit.py         (L4 — LM decode, both phases)
+3. python kaggle/01_baseline_submission.py       (T4 — get a score on the board today)
+4. python kaggle/02_train_w2vbert.py             (T4 — the actual model; re-run to resume)
+5. python kaggle/03_decode_and_submit.py         (T4 — LM decode, both phases)
 6. python local/validate_submission.py <csv>     (locally — before every upload)
 ```
 
