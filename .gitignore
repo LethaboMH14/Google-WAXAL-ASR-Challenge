@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# The raw Zindi download — data/zindi/ is the extracted copy, this is the duplicate.
+google-waxal-asr-challenge*/
+google-waxal-asr-challenge*.zip
+
+# Model / LM artefacts. These are big and are rebuilt by the scripts.
+*.tflite
+*.bin
+*.arpa
+*.pt
+*.safetensors
+lm_corpus/
+w2vbert-waxal/
+
+# Submissions are generated, not source. Keep the ones you actually uploaded by
+# renaming them into submissions/ and force-adding.
+/submission*.csv
+!submissions/
+
+# Secrets. There should be none in this project, but never in repo regardless.
+.env
+kaggle.json
+*.token

@@ -1,0 +1,355 @@
+"""
+STAGE 2 — the actual model. One multilingual w2v-bert-2.0 CTC head over lin + sna + lug.
+
+Run on Kaggle GPU, Internet ON. Budget ~8h per session, resumable; plan two sessions.
+
+Why this shape:
+  * ONE model, not three. Phase 2 ships no language metadata, so a per-language model has no
+    way to route. All three languages are Bantu in Latin script, so a shared character vocab
+    is natural and the languages reinforce each other in the low-resource regime.
+  * w2v-bert-2.0 (580M, pretrained on 4.5M hours / 143 languages) beats MMS-300M on Bantu in
+    arXiv:2512.10968, and MMS-300M is what WAXAL-NET used to set the published numbers.
+  * Streaming from HF: the three train splits are ~25 GB of audio and Kaggle's disk is not
+    worth the risk. Streaming + step-based training is also the right fit for a time-boxed run.
+  * SpecAugment is ON. Phase 2 is explicitly a generalisation test to unseen speakers, so we
+    trade a little train fit for robustness. Do not turn this off to make the loss curve pretty.
+
+Rules guard: trains on `train`, early-stops on `validation`. The `test` split is never opened.
+"""
+
+import json
+import os
+import random
+import re
+import unicodedata
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import torch
+
+# ---------------------------------------------------------------- config
+ZINDI_DIR = Path("/kaggle/input/waxal-zindi")
+RESUME_DIR = Path("/kaggle/input/waxal-ckpt")     # previous session's output, uploaded as a Dataset
+WORK = Path("/kaggle/working")
+OUTDIR = WORK / "w2vbert-waxal"
+
+BASE = "facebook/w2v-bert-2.0"
+HF_CONFIGS = {"lin": "lin_asr", "sna": "sna_asr", "lug": "lug_asr"}
+# Sampling weights across languages. Measured Train.csv counts are lin 16,244 / sna 15,836 /
+# lug 6,119 utterances, i.e. natural proportions of 0.43 / 0.41 / 0.16. The weights below
+# leave Lingala at its natural share (it is the hardest language at 42.6 WER, so it needs
+# every example it has) and move sampling mass from Shona to Luganda, which is starved at 16%
+# and would otherwise be the language the shared model quietly gives up on.
+LANG_WEIGHTS = {"lin": 0.42, "sna": 0.34, "lug": 0.24}
+
+MAX_SECONDS = 20.0          # clips run 3-67s; >20s blows T4 VRAM and adds little
+MIN_SECONDS = 1.0
+
+# --- CTC frame rate: the one config choice this dataset actually forces ---
+# w2v-bert-2.0 ships with add_adapter=True, and essentially every w2v-bert fine-tuning
+# tutorial keeps it. Those tutorials target CommonVoice-style utterances of ~5 words. WAXAL
+# is not that: measured over Train.csv, transcripts average **176 characters** (26 words),
+# p95 305, max 650.
+#
+# The adapter is a stride-2 conv after the encoder, so it halves the frame rate from 20ms to
+# 40ms. Do the arithmetic on a typical ~12s clip:
+#
+#   with adapter    12s / 0.040 = 300 frames for ~169 chars -> 1.8 frames per character
+#   without adapter 12s / 0.020 = 600 frames for ~169 chars -> 3.6 frames per character
+#
+# CTC needs at least one frame per label plus a blank between any repeated pair, and Bantu
+# orthography here is full of doubled letters (ekkubo, ssukuma, ennyaanya, amaato). At 1.8
+# frames/char a large fraction of the training set is either unlearnable or right at the edge,
+# which shows up as inf losses, dropped examples and a model that truncates long utterances.
+# Disabling the adapter costs a little memory in the CTC head only — the encoder is untouched —
+# and buys back the headroom. This is measured, not stylistic.
+ADD_ADAPTER = False
+SAMPLES_PER_FRAME = 640 if ADD_ADAPTER else 320
+# HF Trainer counts OPTIMIZER steps, not forward passes. On 2xT4 with the batch below, one
+# optimizer step is ~10-16s wall clock, so a single ~8h session buys roughly 2000-2800 steps.
+# WAXAL-NET converged at 2000-3500 steps, so ONE session already lands near convergence and
+# a second is upside rather than a prerequisite. Raise this if you get a second session.
+MAX_STEPS = 2500
+BATCH = 4
+# Effective batch must land near 32 (the WAXAL-NET recipe). Trainer multiplies by device
+# count, so on Kaggle's 2xT4 this is 4 * 2 * 4 = 32. On a single GPU set GRAD_ACCUM = 8.
+GRAD_ACCUM = 4 if torch.cuda.device_count() > 1 else 8
+LR = 5e-5                   # 1e-4 is the paper's value for MMS-300M; w2v-bert prefers lower
+WARMUP = 200
+EVAL_EVERY = 500
+SEED = 1337
+
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+
+OUTDIR.mkdir(parents=True, exist_ok=True)
+BF16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+print(f"cuda={torch.cuda.is_available()} bf16={BF16} n_gpu={torch.cuda.device_count()}")
+
+
+# ---------------------------------------------------------------- text normalisation
+# MEASURED, not guessed. Two independent sources fix this policy:
+#
+#   1. The organisers' own starter notebook (Waxal_Challenge_Starter_Code.ipynb, section 8)
+#      evaluates with:  jiwer.wer([r.lower() ...], [p.lower() ...])
+#      It lowercases BOTH sides and does NOT touch punctuation. So lowercasing is free, and
+#      punctuation is scored.
+#   2. local/inspect_data.py over the real Train.csv: 67,456 full stops and 28,620 commas
+#      across 993,916 words. Dropping punctuation would put a substitution on ~9.7% of all
+#      tokens — an own goal of roughly 10 absolute WER before the model does anything.
+#
+# Hence: lowercase yes, strip punctuation NO. The apostrophe in particular is orthographic in
+# Luganda (w'ekkubo, ng'atambulira) — 16,337 occurrences in 6,119 utterances — and removing it
+# would corrupt the words themselves, not merely their punctuation.
+LOWERCASE = True
+
+# Punctuation the model is expected to emit. Everything measured above ~300 occurrences and
+# genuinely predictable from prosody or orthography.
+KEEP_PUNCT = set(".,'’-;:!?")
+
+
+def normalise(text: str) -> str:
+    text = unicodedata.normalize("NFC", str(text)).strip()
+    if LOWERCASE:
+        text = text.lower()
+    # Keep letters, spaces and the punctuation above. Digits (≈500 chars in the whole corpus),
+    # brackets, quotes and stray symbols are dropped: too rare to learn, pure vocab bloat.
+    text = "".join(c if (c.isalpha() or c.isspace() or c in KEEP_PUNCT) else " " for c in text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fold_rare(text: str, allowed: set[str]) -> str:
+    """
+    Map characters too rare to earn a CTC label onto their unaccented base (é -> e), and drop
+    what still doesn't fit. Without this, a handful of one-off characters (ĝ, þ, œ) each get a
+    vocab slot they will never learn, and every one of them is a permanent [UNK] in the labels.
+    """
+    out = []
+    for c in text:
+        if c in allowed:
+            out.append(c)
+            continue
+        base = "".join(ch for ch in unicodedata.normalize("NFD", c)
+                       if not unicodedata.combining(ch))
+        out.append(base if base and all(b in allowed for b in base) else " ")
+    return re.sub(r"\s+", " ", "".join(out)).strip()
+
+
+# ---------------------------------------------------------------- vocab from Zindi Train.csv
+# Using the CSV instead of streaming HF text means we see every training transcript without
+# pulling a single byte of audio.
+import pandas as pd
+from collections import Counter
+
+# Zindi's CSVs backslash-escape quotes inside quoted fields (`\"`), which is not standard CSV.
+# 23 of the 38,199 rows have it and pandas dies on the first one without escapechar.
+train_csv = pd.read_csv(ZINDI_DIR / "Train.csv", escapechar="\\")
+TXT_COL = next(c for c in train_csv.columns
+               if c.lower() in ("transcription", "transcript", "text", "target", "sentence"))
+raw = [normalise(t) for t in train_csv[TXT_COL].dropna().astype(str)]
+raw = [c for c in raw if c]
+print(f"train transcripts: {len(raw):,}")
+
+# A character earns a CTC label by being frequent enough to actually learn. The tail below
+# this threshold is accents on loanwords and OCR-ish noise; fold_rare maps it onto base
+# letters instead of handing each one an untrainable slot.
+MIN_CHAR_COUNT = 25
+counts = Counter("".join(raw))
+allowed = {c for c, n in counts.items() if n >= MIN_CHAR_COUNT and not c.isspace()}
+dropped = {c: n for c, n in counts.items() if c not in allowed and not c.isspace()}
+print(f"chars kept {len(allowed)}, folded/dropped {len(dropped)}: {dropped}")
+
+corpus = [fold_rare(c, allowed) for c in raw]
+corpus = [c for c in corpus if c]
+
+chars = sorted(allowed)
+vocab = {c: i for i, c in enumerate(chars)}
+vocab["|"] = len(vocab)          # word delimiter
+vocab["[UNK]"] = len(vocab)
+vocab["[PAD]"] = len(vocab)
+(OUTDIR / "vocab.json").write_text(json.dumps(vocab, ensure_ascii=False), encoding="utf-8")
+print(f"vocab size {len(vocab)}: {''.join(chars)}")
+
+# Stash the LM corpus and the exact charset, so stages 0 and 3 normalise identically without
+# having to re-derive anything. A mismatch here silently degrades beam search.
+(OUTDIR / "lm_corpus.txt").write_text("\n".join(corpus), encoding="utf-8")
+(OUTDIR / "charset.json").write_text(
+    json.dumps({"allowed": sorted(allowed), "lowercase": LOWERCASE,
+                "keep_punct": sorted(KEEP_PUNCT), "min_char_count": MIN_CHAR_COUNT},
+               ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------- processor
+from transformers import (
+    SeamlessM4TFeatureExtractor,
+    Wav2Vec2BertForCTC,
+    Wav2Vec2BertProcessor,
+    Wav2Vec2CTCTokenizer,
+)
+
+tokenizer = Wav2Vec2CTCTokenizer(
+    str(OUTDIR / "vocab.json"),
+    unk_token="[UNK]", pad_token="[PAD]", word_delimiter_token="|",
+)
+feature_extractor = SeamlessM4TFeatureExtractor.from_pretrained(BASE)
+processor = Wav2Vec2BertProcessor(feature_extractor=feature_extractor, tokenizer=tokenizer)
+processor.save_pretrained(OUTDIR)
+
+
+# ---------------------------------------------------------------- streaming data
+from datasets import Audio, interleave_datasets, load_dataset
+
+
+def build(split: str):
+    parts, probs = [], []
+    for lang, cfg in HF_CONFIGS.items():
+        ds = load_dataset("google/WaxalNLP", cfg, split=split, streaming=True)
+        ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+        if split == "train":
+            ds = ds.shuffle(seed=SEED, buffer_size=1500)
+        parts.append(ds)
+        probs.append(LANG_WEIGHTS[lang])
+    total = sum(probs)
+    return interleave_datasets(parts, probabilities=[p / total for p in probs],
+                               seed=SEED, stopping_strategy="all_exhausted")
+
+
+def prepare(batch: dict) -> dict:
+    wav = np.asarray(batch["audio"]["array"], dtype=np.float32)
+    feats = feature_extractor(wav, sampling_rate=16000)
+    batch["input_features"] = feats.input_features[0]
+    batch["labels"] = tokenizer(fold_rare(normalise(batch["transcription"]), allowed)).input_ids
+    batch["n_samples"] = len(wav)
+    return batch
+
+
+def keep(batch: dict) -> bool:
+    n = batch["n_samples"]
+    if not (MIN_SECONDS * 16000 <= n <= MAX_SECONDS * 16000):
+        return False
+    # CTC cannot emit more labels than it has output frames, and it needs slack on top for the
+    # blanks that separate repeated characters. SAMPLES_PER_FRAME is 320 because we disable the
+    # adapter (see ADD_ADAPTER); the 1.5x margin keeps marginal examples out rather than
+    # feeding the model alignments it cannot represent.
+    return 0 < len(batch["labels"]) * 1.5 < n / SAMPLES_PER_FRAME
+
+
+cols_to_drop = ["audio", "transcription", "speaker_id", "language", "gender", "id"]
+train_ds = build("train").map(prepare, remove_columns=cols_to_drop).filter(keep)
+eval_ds = (build("validation").map(prepare, remove_columns=cols_to_drop)
+           .filter(keep).take(400))
+
+
+@dataclass
+class Collator:
+    processor: Any
+
+    def __call__(self, features: list[dict]) -> dict:
+        batch = self.processor.feature_extractor.pad(
+            [{"input_features": f["input_features"]} for f in features], return_tensors="pt"
+        )
+        labels_batch = self.processor.tokenizer.pad(
+            [{"input_ids": f["labels"]} for f in features], return_tensors="pt"
+        )
+        batch["labels"] = labels_batch.input_ids.masked_fill(
+            labels_batch.attention_mask.ne(1), -100
+        )
+        return batch
+
+
+# ---------------------------------------------------------------- metrics
+import evaluate
+
+wer_metric = evaluate.load("wer")
+cer_metric = evaluate.load("cer")
+
+
+def compute_metrics(pred) -> dict:
+    logits = pred.predictions
+    ids = np.argmax(logits, axis=-1)
+    label_ids = pred.label_ids.copy()
+    label_ids[label_ids == -100] = tokenizer.pad_token_id
+    hyp = processor.batch_decode(ids)
+    ref = processor.batch_decode(label_ids, group_tokens=False)
+    pairs = [(h, r) for h, r in zip(hyp, ref) if r.strip()]
+    if not pairs:
+        return {"wer": 1.0, "cer": 1.0, "score": 0.0}
+    hyp, ref = zip(*pairs)
+    wer = wer_metric.compute(predictions=list(hyp), references=list(ref))
+    cer = cer_metric.compute(predictions=list(hyp), references=list(ref))
+    # Mirrors the leaderboard: higher is better, so early stopping optimises the real target.
+    return {"wer": wer, "cer": cer, "score": 1.0 - 0.5 * (min(wer, 1.0) + min(cer, 1.0))}
+
+
+# ---------------------------------------------------------------- model
+init_from = str(RESUME_DIR / "w2vbert-waxal") if (RESUME_DIR / "w2vbert-waxal").exists() else BASE
+print(f"initialising from: {init_from}")
+
+model = Wav2Vec2BertForCTC.from_pretrained(
+    init_from,
+    attention_dropout=0.05,
+    hidden_dropout=0.05,
+    feat_proj_dropout=0.0,
+    # SpecAugment — the generalisation insurance for Phase 2's unseen speakers.
+    mask_time_prob=0.05,
+    mask_time_length=10,
+    mask_feature_prob=0.05,
+    mask_feature_length=64,
+    layerdrop=0.0,
+    ctc_loss_reduction="mean",
+    ctc_zero_infinity=True,        # survive the odd pathological alignment instead of NaN-ing
+    add_adapter=ADD_ADAPTER,       # False — see the frame-rate note in the config block
+    pad_token_id=tokenizer.pad_token_id,
+    vocab_size=len(tokenizer),
+    ignore_mismatched_sizes=(init_from == BASE),
+)
+model.gradient_checkpointing_enable()
+print(f"params: {sum(p.numel() for p in model.parameters())/1e6:.0f}M")
+
+from transformers import Trainer, TrainingArguments
+
+args = TrainingArguments(
+    output_dir=str(OUTDIR),
+    max_steps=MAX_STEPS,
+    per_device_train_batch_size=BATCH,
+    per_device_eval_batch_size=BATCH,
+    gradient_accumulation_steps=GRAD_ACCUM,
+    gradient_checkpointing=True,
+    learning_rate=LR,
+    warmup_steps=WARMUP,
+    lr_scheduler_type="linear",
+    bf16=BF16,
+    fp16=not BF16,
+    eval_strategy="steps",
+    eval_steps=EVAL_EVERY,
+    save_strategy="steps",
+    save_steps=EVAL_EVERY,
+    save_total_limit=2,
+    load_best_model_at_end=True,
+    metric_for_best_model="score",
+    greater_is_better=True,
+    logging_steps=50,
+    dataloader_num_workers=2,
+    report_to=[],
+    seed=SEED,
+    group_by_length=False,          # unavailable on a streaming dataset
+    remove_unused_columns=False,
+)
+
+trainer = Trainer(
+    model=model,
+    args=args,
+    train_dataset=train_ds,
+    eval_dataset=eval_ds,
+    data_collator=Collator(processor=processor),
+    compute_metrics=compute_metrics,
+)
+
+trainer.train()
+trainer.save_model(str(OUTDIR))
+processor.save_pretrained(str(OUTDIR))
+print(f"\nsaved to {OUTDIR}")
+print("Now: Kaggle -> Output -> 'New Dataset' -> name it waxal-ckpt, so session 2 and stage 3 can load it.")

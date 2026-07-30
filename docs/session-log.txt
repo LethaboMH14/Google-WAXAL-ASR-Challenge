@@ -1,0 +1,573 @@
+
+Zindi (→ zindi.world)
+Compete (→ zindi.world)Jobs (→ zindi.world)Learn (→ zindi.world)Chat (→ zindi.world)Leaderboard (→ zindi.world)
+Google WAXAL ASR Challenge
+$10 000 USD
+Closing soon! (3 days left)
+Skills you will learn
+Automatic Speech Recognition
+Natural Language Processing
+Multilingual AI
+Large Language Models
+1303 joined
+182 active
+Info (→ zindi.world)Data (→ zindi.world)Chat (→ zindi.world)Leaderboard (→ zindi.world)Team (→ zindi.world)Submissions (→ zindi.world)
+Submit (→ zindi.world)
+Starti
+26 Jun 26
+Closei
+03 Aug 26
+Reveali
+03 Aug 26
+Can your model advance speech AI for underrepresented languages?
+
+
+
+Voice technologies have transformed how people interact with digital services, yet most African languages remain underserved due to a lack of large-scale, high-quality speech datasets. WAXAL changes that. Developed through a multi-year collaboration between Google Research and multiple African academic and community organisations, WAXAL provides one of the largest openly-accessible speech resources for African languages, covering 27 languages spoken by more than 100 million people across Africa. The dataset includes thousands of hours of natural speech and high-quality recordings designed to advance speech recognition and speech generation research. This challenge aims to accelerate the development of inclusive speech technologies that enable more people to access digital services in their own languages.
+In this challenge, you will use the WAXAL dataset to build automatic speech recognition (ASR) systems that can generalise to previously unseen speech data, with a focus on Lingala, Shona, and Luganda.
+
+
+About Google Research (→ research.google)
+At Google Research, our mission is to drive breakthroughs that benefit society, businesses, and Google products. We advance scientific progress by publishing hundreds of papers each year and collaborating with universities, NGOs, partners, and communities worldwide. Our goal is to build a world where AI is more than a tool: it’s an essential partner for researchers, scientists, clinicians, teachers, users, and businesses.
+Evaluation
+This challenge uses multi-metric evaluation (→ zindi.africa). There are two error metrics: Word Error Rate (→ zindi.africa) (WER), and Character Error Rate (CER).
+The final score on the leaderboard is the weighted mean of the two evaluation metrics.
+
+Metric         Weighting
+WER            0.5
+CER            0.5
+This balances word-level accuracy with character-level robustness, helping account for spelling variation across African languages.
+Prizes
+🥇 1st prize: $4 000 USD
+🥈2nd prize: $2 500 USD
+🥉3rd prize: $2 000 USD
+Best African participant: $1 500 USD
+Note best African participant can also win an overall prize.
+There are 10 000 Zindi points available. You can read more about Zindi points here (→ zindi.africa).
+Winners will be announced at Deep Learning Indaba (→ deeplearningindaba.com) 2-7 August 2026.
+Rules
+
+* Languages and tools: You may only use open-source languages and tools in building models for this challenge.
+* Who can compete: Open to all
+* Submission Limits: 5 submissions per day, 200 submissions overall.
+* Team size: Max team size of 4
+* Public-Private Split: Zindi maintains a public leaderboard and a private leaderboard for each challenge. The Public Leaderboard includes approximately 30% of the test dataset. The private leaderboard will be revealed at the close of the challenge and contains the remaining 70% of the test set.
+* Data Sharing: CC-BY 4.0
+* Code Review: Top 10 on the private leaderboard will receive an email requesting their code at the close of the challenge. You will have 48 hours to submit your code.
+* Code sharing: Multiple accounts, or sharing of code and information across accounts not in teams, is not allowed and will lead to disqualification.
+
+ENTRY INTO THIS CHALLENGE CONSTITUTES YOUR ACCEPTANCE OF THESE OFFICIAL CHALLENGE RULES.
+Full Challenge Rules
+This challenge is open to all.
+Teams and collaboration
+You may participate in challenges as an individual or in a team of up to four people. When creating a team, the team must have a total submission count less than or equal to the maximum allowable submissions as of the formation date. A team will be allowed the maximum number of submissions for the challenge, minus the total number of submissions among team members at team formation. Prizes are transferred only to the individual players or to the team leader.
+Multiple accounts per user are not permitted, and neither is collaboration or membership across multiple teams. Individuals and their submissions originating from multiple accounts will be immediately disqualified from the platform.
+Code must not be shared privately outside of a team. Any code that is shared, must be made available to all challenge participants through the platform. (i.e. on the discussion boards).
+The Zindi data scientist who sets up a team is the default Team Leader but they can transfer leadership to another data scientist on the team. The Team Leader can invite other data scientists to their team. Invited data scientists can accept or reject invitations. Until a second data scientist accepts an invitation to join a team, the data scientist who initiated a team remains an individual on the leaderboard. No additional members may be added to teams within the final 5 days of the challenge or last hour of a hackathon.
+The team leader can initiate a merge with another team. Only the team leader of the second team can accept the invite. The default team leader is the leader from the team who initiated the invite. Teams can only merge if the total number of members is less than or equal to the maximum team size of the challenge.
+A team can be disbanded if it has not yet made a submission. Once a submission is made individual members cannot leave the team.
+All members in the team receive points associated with their ranking in the challenge and there is no split or division of the points between team members.
+Datasets, packages and general principles
+The solution must use publicly-available, open-source packages only.
+You may use only the datasets specified for this challenge.
+You may use pretrained models as long as they are openly available to everyone.
+Automated machine learning tools such as automl are not permitted.
+If the error metric requires probabilities to be submitted, do not set thresholds (or round your probabilities) to improve your place on the leaderboard. In order to ensure that the client receives the best solution Zindi will need the raw probabilities. This will allow the clients to set thresholds to their own needs.
+You are allowed to access, use and share challenge data for any commercial, non-commercial, research or education purposes, under a CC-BY SA 4.0 license.
+You must notify Zindi immediately upon learning of any unauthorised transmission of or unauthorised access to the challenge data, and work with Zindi to rectify any unauthorised transmission or access.
+Your solution must not infringe the rights of any third party and you must be legally entitled to assign ownership of all rights of copyright in and to the winning solution code to Zindi.
+Submissions and winning
+You may make a maximum of 5 submissions per day.
+You may make a maximum of 200 submissions for this challenge.
+Before the end of the challenge you need to choose 2 submissions to be judged on for the private leaderboard. If you do not make a selection your 2 best public leaderboard submissions will be used to score on the private leaderboard.
+During the challenge, your best public score will be displayed regardless of the submissions you have selected. When the challenge closes your best private score out of the 2 selected submissions will be displayed.
+Zindi maintains a public leaderboard and a private leaderboard for each challenge. The Public Leaderboard includes approximately 20% of the test dataset. While the challenge is open, the Public Leaderboard will rank the submitted solutions by the accuracy score they achieve. Upon close of the challenge, the Private Leaderboard, which covers the other 80% of the test dataset, will be made public and will constitute the final ranking for the challenge.
+Note that to count, your submission must first pass processing. If your submission fails during the processing step, it will not be counted and not receive a score; nor will it count against your daily submission limit. If you encounter problems with your submission file, your best course of action is to ask for advice on the challenge page.
+If you are in the top 10 at the time the leaderboard closes, we will email you to request your code. On receipt of email, you will have 48 hours to respond and submit your code following the Reproducibility of submitted code guidelines detailed below. Failure to respond will result in disqualification.
+If your solution places 1st, 2nd, or 3rd on the final leaderboard, you will be required to submit your winning solution code to us for verification, and you thereby agree to assign all worldwide rights of copyright in and to such winning solution to Zindi.
+If two solutions earn identical scores on the leaderboard, the tiebreaker will be the date and time in which the submission was made (the earlier solution will win).
+The winners will be paid via bank transfer, PayPal if payment is less than or equivalent to $100, or other international money transfer platform. International transfer fees will be deducted from the total prize amount, unless the prize money is under $500, in which case the international transfer fees will be covered by Zindi. In all cases, the winners are responsible for any other fees applied by their own bank or other institution for receiving the prize money. All taxes imposed on prizes are the sole responsibility of the winners. The top winners or team leaders will be required to present Zindi with proof of identification, proof of residence and a letter from your bank confirming your banking details. Winners will be paid in USD or the currency of the challenge. If your account cannot receive US Dollars or the currency of the challenge then your bank will need to provide proof of this and Zindi will try to accommodate this.
+Please note that due to the ongoing Russia-Ukraine conflict, we are not currently able to make prize payments to winners located in Russia. We apologise for any inconvenience that may cause, and will handle any issues that arise on a case-by-case basis.
+Payment will be made after code review and sealing the leaderboard.
+You acknowledge and agree that Zindi may, without any obligation to do so, remove or disqualify an individual, team, or account if Zindi believes that such individual, team, or account is in violation of these rules. Entry into this challenge constitutes your acceptance of these official challenge rules.
+Zindi is committed to providing solutions of value to our clients and partners. To this end, we reserve the right to disqualify your submission on the grounds of usability or value. This includes but is not limited to the use of data leaks or any other practices that we deem to compromise the inherent value of your solution.
+Zindi also reserves the right to disqualify you and/or your submissions from any challenge if we believe that you violated the rules or violated the spirit of the challenge or the platform in any other way. The disqualifications are irrespective of your position on the leaderboard and completely at the discretion of Zindi.
+Please refer to the FAQs and Terms of Use for additional rules that may apply to this challenge. We reserve the right to update these rules at any time.
+Reproducibility of submitted code
+If your submitted code does not reproduce your score on the leaderboard, we reserve the right to adjust your rank to the score generated by the code you submitted.
+If your code does not run you will be dropped from the top 10. Please make sure your code runs before submitting your solution.
+Always set the seed. Rerunning your model should always place you at the same position on the leaderboard. When running your solution, if randomness shifts you down the leaderboard we reserve the right to adjust your rank to the closest score that your submission reproduces.
+Custom packages in your submission notebook will not be accepted.
+You may only use tools available to everyone i.e. no paid services or free trials that require a credit card.
+Read this article (→ zindi.africa) on how to prepare your documentation and this article (→ zindi.africa) on how to ensure a successful code review.
+Consequences of breaking any rules of the challenge or submission guidelines:
+
+* First offence: No prizes for 6 months and 2000 points will be removed from your profile (probation period). If you are caught cheating, all individuals involved in cheating will be disqualified from the challenge(s) you were caught in and you will be disqualified from winning any challenges for the next six months and 2000 points will be removed from your profile. If you have less than 2000 points to your profile your points will be set to 0.
+* Second offence: Banned from the platform. If you are caught for a second time your Zindi account will be disabled and you will be disqualified from winning any challenges or Zindi points using any other account.
+
+Teams with individuals who are caught cheating will not be eligible to win prizes or points in the challenge in which the cheating occurred, regardless of the individuals’ knowledge of or participation in the offence.
+Teams with individuals who have previously committed an offence will not be eligible for any prizes for any challenges during the 6-month probation period.
+Monitoring of submissions
+We will review the top 10 solutions of every challenge when the challenge ends.
+We reserve the right to request code from any user at any time during a challenge. You will have 24 hours to submit your code following the rules for code review (see above). Zindi reserves the right not to explain our reasons for requesting code. If you do not submit your code within 24 hours you will be disqualified from winning any challenges or Zindi points for the next six months. If you fall under suspicion again and your code is requested and you fail to submit your code within 24 hours, your Zindi account will be disabled and you will be disqualified from winning any challenges or Zindi points with any other account.
+Join the largest network for
+data scientists and AI builders
+About (→ zindi.world)FAQs (→ zindi.world)
+Privacy Policy (→ zindi.world)Terms of Use (→ zindi.world)Rules (→ zindi.world)
+Status (→ status.zindi.africa)
+© Zindi 2026
+
+Zindi
+CompeteJobsLearnChatLeaderboard
+
+
+Primary competition visual
+Google WAXAL ASR Challenge
+$10 000 USD
+Closing soon! (3 days left)
+Skills you will learn
+Automatic Speech Recognition
+Natural Language Processing
+Multilingual AI
+Large Language Models
+1303 joined
+182 active
+InfoDataChatLeaderboardTeamSubmissions
+Submit
+avatar
+Start
+i
+26 Jun 26
+Close
+i
+03 Aug 26
+Reveal
+i
+03 Aug 26
+About
+Phase 1: Build, Experiment, and Climb the Leaderboard
+
+Welcome to the challenge! In Phase 1, you'll explore the WAXAL dataset and build speech recognition models for African languages using one of the largest openly available African speech resources ever created.
+
+Phase 1 uses the WAXAL train, validation, and test splits as provided on Hugging Face. You will have access to the training and validation data, including transcriptions, for model development. The provided test set will be used for leaderboard evaluation, with participants submitting predicted transcriptions for scoring.
+
+This gives you the opportunity to experiment with different architectures, fine-tuning approaches, data augmentation techniques, and multilingual learning strategies. Once your model is ready, you'll generate predictions for the provided test set and submit them to the leaderboard.
+
+This is your chance to learn from the data, compare approaches with the community, and steadily improve your score. Whether you're building your first ASR model or pushing the state of the art, Phase 1 is all about innovation, collaboration, and discovering what works.
+
+Use this phase to develop the strongest model you can - we'll be putting it to the ultimate test in Phase 2.
+
+Participants may supplement the provided challenge data with other publicly available open-source speech or language datasets. Any external datasets used must be publicly accessible, legally licensed for research or development, and disclosed in the final solution documentation.
+
+Phase 2: The Ultimate Generalisation Test
+
+The real challenge begins here. At the start of Phase 2, we'll release a completely new and unseen test set. These audio samples have not been included in any of the training, validation, or Phase 1 test data, providing a true measure of how well your model generalises to new speakers and recordings.
+
+Your task is simple: use the model you've developed during Phase 1 to generate predictions for this new dataset. No additional labels will be provided, and the final competition rankings will be determined using performance on this unseen dataset.
+
+To ensure a true test of model generalisation, participants will only receive the audio data during Phase 2 - approximately one week before the challenge closes. Metadata and auxiliary information such as language, speaker identity, gender, and other descriptive attributes will not be provided. Successful solutions will therefore need to rely on the speech signal itself rather than metadata-driven shortcuts.
+
+This phase rewards robust, well-designed models rather than leaderboard optimisation. The teams that have learned the most from the WAXAL dataset and built solutions that generalise effectively across languages and speakers will rise to the top.
+
+Important: The Phase 1 leaderboard is designed to support model development, collaboration and experimentation. Final rankings and prize winners will be determined based on performance on the Phase 2 evaluation dataset.
+
+Any Phase 1 submission that uses the publicly available ground-truth labels for the Phase 1 test set will be treated as a breach of the challenge rules and may lead to disqualification.
+
+Access the data here: https://huggingface.co/datasets/google/WaxalNLP
+
+Access Phase 2 audio data here: https://storage.googleapis.com/waxalphase2/audio.zip
+
+Files
+
+Download all files in archive
+2.2 MB
+Description
+Files
+Starter notebook to help you get going.
+
+Waxal_Challenge_Starter_Code.ipynb
+282.5 KB
+Shows the structure of the sample submission file.
+
+SampleSubmission.csv
+57.7 KB
+Test resembles Train.csv but without the target-related column. This is the dataset on which you will apply your model to.
+
+Test.csv
+41.1 KB
+Train contains the target. This is the dataset that you will use to train your model.
+
+Train.csv
+7.5 MB
+Test resembles Train.csv but without the target-related column. This is the dataset on which you will apply your model to.
+
+Test_phase2.csv
+14.7 KB
+Join the largest network for
+data scientists and AI builders
+
+About
+FAQs
+Privacy Policy
+Terms of Use
+Rules
+Status
+© Zindi 2026
+
+
+this is the dataset website 
+https://huggingface.co/datasets/google/WaxalNLP
+
+Please verify your email address by clicking on the email we just sent you.
+Verify now (→ mail.google.com)Didn’t receive it? (→ zindi.world)
+Zindi (→ zindi.world)
+Compete (→ zindi.world)Jobs (→ zindi.world)Learn (→ zindi.world)Chat (→ zindi.world)Leaderboard (→ zindi.world)
+Back (→ zindi.world)
+Zindi Error Metric Series: What is Word Error Rate
+Upvotes
+2
+Getting started · 27 Nov 2024, 10:13 · 2 mins read ·
+2
+When working on a machine learning project, choosing the right error or evaluation metric is critical. This is a measure of how well your model performs at the task you built it for, and choosing the correct metric for the model is a critical task for any machine learning engineer or data scientist. Word Error Rate (WER) is used for Automatic Speech Recognition (ASR) problems.
+For Zindi competitions, we choose the evaluation metric for each competition based on what we want the model to achieve. Understanding each metric and the type of model you use each for is one of the first steps towards mastery of machine learning techniques.
+Word Error Rate is used to compare the accuracy of the transcript or text produced by an ASR model.
+WER is calculated as follows,
+
+
+Where,
+
+* S stands for substitutions,
+* I stands for insertions,
+* D stands for deletions,
+* N is the number of words in the reference (that were actually said).
+
+WER compares word for word so if a word is spelt incorrectly or if you do not use diacritics but the reference does you will recieve a bad WER score.
+
+Evaluating Natural Language Processing models are tricky as no one metric takes into account all aspects of the model. For instance diacritics and spelling need to be correct to use WER, this becomes tricky when slang or a minority language is evaluated. When evaluating ASR models with WER punctuation is not included. This can be a problem as punctuation adds depth to text and meaning could be misconstrued.
+
+According to Microsoft (→ docs.microsoft.com), a WER of 5-10% is considered to be good quality and is ready to use. A WER of 20% is acceptable, but you might want to consider additional training. A WER of 30% or more signals poor quality and requires customization and training.
+This is a good goal to keep in mind but it is not the golden rule. Your WER depends on the size of your data and the language.
+
+With this knowledge, you should be well equipped to use WER for your next machine learning project.
+
+Why don’t you test out your new knowledge on one of our past automatic speech recognition competitions that uses WER as its evaluation metric? We suggest the AI4D Baamtu Datamation - Automatic Speech Recognition in WOLOF Challenge (→ zindi.africa).
+
+Back to top
+If you enjoyed this content upvote this article to show your support
+Upvotes
+2
+Discussion 0 answers
+Subscribe
+Please verify your email first
+Retry
+Join the largest network for
+data scientists and AI builders
+About (→ zindi.world)FAQs (→ zindi.world)
+Privacy Policy (→ zindi.world)Terms of Use (→ zindi.world)Rules (→ zindi.world)
+Status (→ status.zindi.africa)
+© Zindi 2026
+
+Zindi (→ zindi.world)
+Compete (→ zindi.world)Jobs (→ zindi.world)Learn (→ zindi.world)Chat (→ zindi.world)Leaderboard (→ zindi.world)
+Back (→ zindi.world)
+Introducing Multi-Metric Evaluation, or One Metric to Rule them All
+Upvotes
+29
+Getting started · 29 Jul 2025, 13:51 · 4 mins read ·
+29
+At Zindi, we’re always working to make our challenges and our platform better - better at generating real-world solutions to pressing global problems, and better as a place to learn real-world machine learning and AI skills. That’s why we’re excited to introduce a brand-new evaluation approach and an upgrade to Zindi’s core scoring functionality: multi-metric evaluation. Multi-metric evaluation is a way to measure model performance across multiple dimensions, not just a single evaluation metric.
+🌍 Real-world problems deserve real-world metrics
+In the real world, machine learning models rarely succeed by being good at just one thing. Optimising for accuracy at the cost of other metrics makes for fragile, one-dimensional models, or misses key measures of success in other contexts. We need ways to measure the performance of our ML models holistically, and that’s where multi-metric evaluation come in.
+Up until now, Zindi challenges have been restricted to a single error metric—Accuracy, RMSE, IoU, etc. But as machine learning tasks become more complex and multi-faceted, this just doesn’t cut it anymore. That’s why we’ve introduced multi-metric, multi-column evaluation.
+Now, we can evaluate multiple outputs from a model at once - each with its own appropriate scoring metric - and combine them into a single leaderboard score.
+For example, your model might be asked to:
+
+* Predict a class label or attribute (evaluated with Accuracy),
+* Reconstruct a polygon boundary (evaluated with Intersection over Union (IoU)),
+* Estimate a continuous value (evaluated with RMSE or MAE),
+* Or even generate a text summary (evaluated with ROUGE-F or WER).
+
+Instead of reducing all that to a single measure, we now calculate the score for each target output, then combine them using a weighted average. Combinations of two or more existing error metric vastly expands the ways in which we can evaluate your performance in a challenge.
+
+
+
+
+🛠️ Why we built this
+✅ Robustness: Models shouldn’t game the metric. By evaluating across multiple outputs, we reduce the risk of “overfitting to the leaderboard” and reward more generalisable solutions - better for the end-user.
+🧩 Holistic Understanding: We want to be able to reward models that don’t just do one thing well, but that perform well across all aspects of a task.
+📊 Stable Leaderboards: Metrics like RMSE can be volatile, especially when data is skewed. Combining metrics provides a smoother, fairer scoring system.
+🧪 Real-world Performance: In production, your model will be judged on more than accuracy. These metrics better reflect what matters in real deployment settings.
+🚀 How it works on Zindi
+Your submission file will now include specific columns for each error metric. Each column is scored with the relevant metric, and your final score is a weighted average of all of them.
+For example, in our new Barbados Lands and Surveys Plot Automation Challenge (→ zindi.africa), the leaderboard score is:
+
+
+You need to get both the what and the where right to win.
+🔢 Normalising scores
+All metric scores are normalised before being shown on the leaderboard. This ensures fairness when a challenge includes both metrics you want to maximise (such as Accuracy) and metrics you want to minimise (such as Log Loss).
+
+
+
+
+
+📈Regression problems
+Regression metrics behave differently because a value of zero represents a perfect score, and the upper bound can grow indefinitely. To keep these metrics comparable, Zindi sets the x_max value to the metric score of the starter notebook on the leaderboard.
+For rolling leaderboards such as the agriBORA Commodity Price Forecasting Challenge (→ zindi.africa), the x_max values are taken from the starter notebook’s local validation scores instead, to ensure stable normalisation across weeks.
+
+This means you are still aiming for a normalised leaderboard score close to 1 for regression tasks, while continuing to minimise your local validation error in the usual way.
+
+👀 What’s next?
+We’ll be rolling out more challenges that use multi-metric evaluation; whether you're working on geospatial analysis, time-series forecasting, or multimodal fusion, you’ll see this approach in action on Zindi in the coming months.
+We’re committed to challenges that deliver real-world value (not just scoreboard hype) and this is just another step in that journey. We hope you buy into the vision too - multi-metric evaluation means tougher challenges and more relevant skills for your next role.
+💬 WDYT?
+This is a big deal for us, and we’re excited. But what do you think? Tell us what you liked (or didn’t). Got ideas? Drop them in the comments.
+
+Back to top
+If you enjoyed this content upvote this article to show your support
+Upvotes
+29
+Discussion 1 answer
+Subscribe
+What do you think?
+
+Send
+andrewnarine (→ zindi.world)
+i am having fun
+10 Nov 2025, 16:55 (→ zindi.world)
+Upvotes 0
+ReplyReport
+Join the largest network for
+data scientists and AI builders
+About (→ zindi.world)FAQs (→ zindi.world)
+Privacy Policy (→ zindi.world)Terms of Use (→ zindi.world)Rules (→ zindi.world)
+Status (→ status.zindi.africa)
+© Zindi 2026
+
+i have immunis and the whisper model from vuka and beacon so i want the first upload to score , i want a score higher than this and they have private score we are not seeing so we need damn near perferct figure it out dont mes this up, dont tell me you cant figure it out and tell me what else is needed and what task is it and to get it higher and the tests needed and always figure out whats needed to change and increase the score research everywhre on papers and info on this to get this write also watch the video on youtube if neccesary , how do we submit aswell
+
+I'll dig into the environment and the competition specifics before committing to an approach. Let me look at what you already have locally and what hardware we're working with.
+
+
+Ran 4 commands
+No CUDA GPU here — Intel UHD integrated, 7.7 GB RAM. That's a hard constraint that shapes everything, so let me nail down the competition facts and the state of the art before I design around it.
+
+
+Browsed the web, used a tool
+Strong signal already. Let me pin down the achievable numbers and check for existing pretrained models for these exact languages.
+
+
+Browsed the web
+I have what I need to be precise. Let me do two quick local checks, then build.
+
+
+Ran a command, browsed the web
+Research is conclusive. Let me set up the project and write the pipeline.
+
+
+Created 5 files
++1152
+-0
+Background shell completed
+Find existing whisper usage in IMMUNIS, BEACON, VUKA
+
+Read a file, created a file, ran a command
++134
+-0
+Everything compiles. Here's where it stands.
+
+The honest ceiling first
+You asked for near-perfect. That isn't available on this task, and I'd be setting you up to fail if I let you plan around it.
+
+WAXAL is spontaneous image-description speech — people describing pictures in their own words, hundreds of speakers, three low-resource Bantu languages. The corpus authors published their own benchmark, WAXAL-NET, run on A100s:
+
+Language	Train hrs	Best WER	Best CER
+Lingala	71.9	42.6%	18.9%
+Shona	79.7	25.0%	4.3%
+Luganda	37.3	16.9%	3.4%
+Zero-shot Whisper-large on this same data: 93% WER on Lingala, 112% on Shona. So the Whisper work from VUKA/BEACON doesn't transfer — I grepped IMMUNIS, theme 3 discovery and Vuka Gradhack and found no custom Whisper code anyway, just the pip packages. Nothing to salvage there. This build starts from CTC checkpoints.
+
+The leaderboard top of 0.7255 lines up closely with those published numbers, which tells you the leaders are sitting at roughly published-SOTA level. (That's my inference from the metric shape, not a confirmed fact — Zindi's exact normalisation isn't published.) Beating them means beating the corpus authors' own result. That's the real bar, and it's reachable.
+
+Where the win actually is
+WAXAL-NET decoded with CTC greedy. That's the opening. A word-level 5-gram KenLM trained on the WAXAL transcripts, fused via beam search, is a documented 15–25% relative WER cut on CTC models and costs minutes of CPU. That single change plausibly takes Lingala 42.6 → ~34, Shona 25 → ~20, Luganda 16.9 → ~14.
+
+Second edge: most competitors will get Phase 2 wrong. Phase 2 decides the prizes and ships no language metadata. Anyone with three per-language models keyed off a language column has no way to route on the set that counts. So the design is one shared multilingual CTC model + explicit language ID from audio.
+
+Compute reality
+Your laptop has no CUDA GPU — Intel UHD integrated, 7.7 GB RAM. It cannot train or comfortably infer a 600M-param acoustic model. Everything runs on Kaggle free tier (2×T4, ~30 GPU-h/week, 9h sessions, no credit card, so it's rules-compliant). The laptop does orchestration and validation only.
+
+What I built
+../waxal-asr/README.md — full strategy, numbers, GPU-hour budget
+../waxal-asr/local/inspect_data.py — profiles the real transcripts and decides casing/punctuation policy from measurement rather than guesswork
+../waxal-asr/kaggle/01_baseline_submission.py — MMS-1B-all zero-shot, ~1.5 GPU-h, gets you a score today and proves the plumbing before you spend 16 hours training
+../waxal-asr/kaggle/02_train_w2vbert.py — multilingual w2v-bert-2.0 CTC fine-tune, streaming, resumable, SpecAugment on
+../waxal-asr/kaggle/03_decode_and_submit.py — KenLM build, alpha/beta swept on validation, LID, final submission
+../waxal-asr/local/validate_submission.py — format + distribution check before every upload
+One thing you must not do
+The HuggingFace test split contains ground-truth transcriptions, and Phase 1's test set is drawn from it. Joining on id scores ~1.0 and is explicit disqualification under the rules. Both inference scripts drop that column on load with a guard comment. If you see someone's score jump near 1.0, that's what happened to them.
+
+What's blocking me
+Two things I genuinely can't do for you:
+
+Download the 5 Zindi files — they're behind your login. Put Train.csv, Test.csv, Test_phase2.csv, SampleSubmission.csv into C:\Users\USER\Desktop\waxal-asr\data\zindi\. I've written the scripts to auto-detect column names, but I can't confirm whether the current leaderboard scores Phase 1 IDs, Phase 2 IDs, or both until I see SampleSubmission.csv. That's what inspect_data.py resolves in one run.
+A Kaggle account with phone-verified GPU access.
+Then:
+
+python local/inspect_data.py
+Paste that output back to me and I'll set the normalisation flags and confirm the submission contract.
+
+How to submit
+Competition page → Submit → drag the CSV → optional comment → Submit. 5/day, 200 total. Before close on Aug 3, explicitly select the 2 submissions to be judged on the private leaderboard — if you select nothing, your best 2 public scores are used, which is usually not what you want.
+
+I skipped the YouTube search deliberately — the two arXiv benchmark papers give harder numbers than any video would.
+
+Sources: WAXAL-NET · Benchmarking ASR for African Languages · Tone-Conditioned Curriculum Learning for Bantu ASR · google/WaxalNLP · Fine-Tune W2V2-BERT · facebook/mms-1b-all
+
+i have azure and is kaggle only way i only have a laptop for now
+
+Kaggle is not the only way, and Azure genuinely changes the plan — no 9-hour session cap, no 30h/week ceiling. Let me check what your subscription can actually give you rather than guess.
+
+
+Used 2 tools
+Azure for Students. That's a specific constraint — let me check the actual GPU quota rather than assume.
+
+
+Used 2 tools
+That's decisive. Let me confirm it isn't just an eastus artifact, and verify the quota-increase policy rather than assert it.
+
+
+Browsed the web, used a tool
+Confirmed, and it's bad news for Azure. Let me fix a real error in my own training config while I'm at it.
+
+
+Edited 2 files, ran a command
++51
+-11
+Azure can't do it — I checked, didn't guess
+Your subscription is Azure for Students, and every CUDA GPU SKU has quota 0:
+
+SKU	GPU	eastus	southafricanorth
+Standard_NC4as_T4_v3	T4	0	not offered
+Standard_NC6s_v3	V100	0	not offered
+Standard_NV6ads_A10_v5	A10	0	0
+Standard_NV4as_v4	partial AMD MI25	2	not offered
+That one non-zero row is a fractional AMD GPU for virtual desktops — no CUDA, useless for PyTorch.
+
+Raising GPU quota on Azure for Students isn't a form you fill in: Microsoft's own guidance is that you must upgrade to Pay-As-You-Go (credit card) first, then wait on an approval that typically takes days. The competition closes in three. Your $100 credit was never the constraint — the quota is.
+
+One trap to avoid: don't reach for Azure Speech or Azure OpenAI because you have credit. The rules say "You may only use open-source languages and tools." A closed managed API is disqualifying regardless of whether it worked — and it doesn't support Lingala/Shona/Luganda anyway.
+
+No, Kaggle isn't the only way
+Option	GPU	Cost	Verdict
+Kaggle	2×T4	free	30 GPU-h/week, no card. Enough for the entire plan.
+Lightning AI Studio	T4	free tier	~22 GPU-h/mo, persistent disk, no card. Good backup.
+Colab free	T4	free	disconnects hard — stages 1 and 3 only
+Colab Pro	L4/A100	~$10/mo	best value if you can spend anything
+RunPod / Vast.ai	4090	~$0.25/h	~$5 for the whole run; needs a card
+And to kill a worry before it costs you time: renting compute doesn't breach the rules. The "no paid services or free trials that require a credit card" line sits in the code-reproducibility section — it constrains what your solution depends on (paid APIs, AutoML), not where you rent a GPU. Otherwise nobody with a desktop 4090 could enter either.
+
+The laptop is fine, because the plan fits in Kaggle's free tier
+Total budget is ~11 GPU-hours against 30 available:
+
+Stage 1 baseline: ~1.5h
+Stage 2 training: ~8h, one session
+Stage 3 LM decode: ~2h
+I also corrected a real error in my own training config while checking this. I'd set MAX_STEPS = 9000, but HF Trainer counts optimizer steps, not forward passes — at ~10–16s per optimizer step on 2×T4, 9000 was roughly a four-day run. It's now 2500, which is what an 8-hour session actually buys. That happens to land right in WAXAL-NET's convergence window of 2000–3500 steps, so one session gets you a converged model. A second is upside, not a prerequisite. I also made GRAD_ACCUM adapt to the device count so the effective batch stays at 32 whether Kaggle gives you one GPU or two.
+
+Azure still earns its keep on the CPU side — a Standard_D4s_v3 (4 vCPU / 16 GB, quota available) beats your 7.7 GB laptop for building KenLM and running the alpha/beta sweep, both CPU-only. Not required, just free headroom you already own.
+
+Still blocking
+Unchanged, and it's the only thing standing between you and a running pipeline:
+
+Drop the 4 Zindi CSVs into C:\Users\USER\Desktop\waxal-asr\data\zindi\
+Kaggle account, phone-verified for GPU
+Then run:
+
+python local/inspect_data.py
+Paste me that output and I'll set the normalisation flags and confirm whether the leaderboard is scoring Phase 1 IDs, Phase 2 IDs, or both. Everything downstream is written and syntax-checked; that one file is what it's waiting on.
+
+Sources: Azure for Students GPU quota · Request for GPU-Enabled VM Quota Increase for Azure Students
+
+downloaded the csvs, run inspect_data or Drop the 4 Zindi CSVs  from the huggingface can you get them? or where are they ,
+
+Let me find what you actually downloaded.
+
+Searched for downloaded Zindi WAXAL files
+Nothing on disk yet. Let me check for a zip or anything downloaded recently.
+
+Listed most recent downloads and any zip/csv files
+The CSVs aren't on your disk — nothing matching Train.csv, SampleSubmission.csv, or anything WAXAL-named exists anywhere in Downloads, Desktop or Documents. Your most recent downloads are UNISA PDFs from this evening. The download didn't land.
+
+And to answer the real question: no, they are not on HuggingFace, and I can't derive them. Two different things:
+
+HuggingFace google/WaxalNLP = the raw corpus. 2.47M rows, 1.06 TB, audio + transcripts. That's what we train on.
+The 4 Zindi CSVs = the competition's own ID lists and split definitions. Zindi generated these. SampleSubmission.csv is the only thing that says which specific IDs you must predict — that information exists nowhere else. Without it I can't build a submission at all.
+They're behind your Zindi login, so I can't fetch them directly. Meanwhile, let me chase something useful I spotted in your screenshot.
+
+
+Browsed the web
+That's a significant find — bigger than the CSV problem. Let me chase it.
+
+
+Browsed the web
+Two of the three leads are useful. Let me pin down the third before writing it up.
+
+
+Browsed the web
+Read that as confirmation, not noise — that benchmark tests exactly our three languages. Let me look at stage 3 before I change it.
+
+Read
+03_decode_and_submit.py
+Now I'll act on it. The benchmark changes one thing materially: the LM corpus.
+
+
+Created a file, edited a file, ran a command
++387
+-58
+All six compile. Now the README, which had a claim in it that the benchmark just corrected.
+
+
+Edited README.md, ran 2 commands
++60
+-15
+Answering your question first, then the thing I found while checking.
+
+The CSVs are not on HuggingFace, and they're still not on your disk
+Two different sources, easy to conflate:
+
+HuggingFace google/WaxalNLP — the raw corpus. 2.47M rows, 1.06 TB, audio + transcripts. This is what we train on, and my scripts already stream it directly.
+The 4 Zindi CSVs — generated by Zindi, not Google. They're the competition's own ID lists. SampleSubmission.csv is the one that matters: it defines which specific IDs you must predict. That information exists nowhere else and cannot be derived from HF.
+I swept your disk again just now — Downloads, Desktop, Documents. Nothing. The download didn't land. Get it here:
+
+https://zindi.africa/competitions/google-waxal-asr-challenge/data
+"Download all files in archive" (2.2 MB), unzip into the folder I just created:
+
+C:\Users\USER\Desktop\waxal-asr\data\zindi\
+Then run this and paste me the output:
+
+cd "C:\Users\USER\Desktop\waxal-asr" && python local/inspect_data.py
+I can drive your logged-in Chrome to fetch it instead if you'd rather — say the word, since downloading a file needs your go-ahead.
+
+Meanwhile I chased the model leads, and one of them changed the plan
+Three of four candidates are dead ends — details now in README §8 so nobody re-opens them. Simba-W does cover all three languages but it's Whisper seq2seq, which can't take CTC+KenLM fusion; badrex/Ethio-ASR is the right architecture on the right corpus but wrong languages; the asr-africa checkpoints are 1–20 h read-speech fine-tunes, less data than WAXAL gives us and the wrong domain. Raw facebook/w2v-bert-2.0 stays as the init.
+
+The fourth search turned up something much better — arXiv:2512.10968, which benchmarked w2v-bert-2.0 with and without KenLM on exactly Lingala, Luganda and Shona:
+
+Language	greedy	+ KenLM	relative
+Luganda	39.75	16.30	−59%
+Shona	22.56	9.28	−59%
+Lingala	24.19	22.74	−6%
+That's independent measurement confirming the architecture I'd already picked, on our three languages. But it also corrected a claim I had in the README: I'd written that LM fusion is worth 15–25% relative. On these languages it's ~59% for two of the three. The LM isn't one lever among several — it's the deliverable.
+
+And it exposed a real flaw in my stage 3. Those LMs were trained on 9.0M / 9.2M / 5.4M words. I was building the 5-gram from Train.csv alone — roughly 50k words, ~100× short. At that size a 5-gram is a lookup table for the training set, and the same paper shows LM fusion making WER worse in exactly that regime.
+
+So I wrote ../../Desktop/waxal-asr/kaggle/00_build_lm_corpus.py — pulls real monolingual text (Wikipedia, MasakhaNEWS, FLEURS transcripts) per language, normalises it into the acoustic model's exact character space, upweights the in-domain WAXAL transcripts 10×, and reports each corpus as a percentage of the published target so you can see if it's big enough. It runs on a CPU session, so it costs none of your 30 weekly GPU-hours and can run alongside stage 1.
+
+It also writes lm_sources.json with repo, config, word count and licence for every source used — that file is your rules-required external-data disclosure, so it can't drift from what the code actually did.
+
+Stage 3 now consumes that corpus, builds binary LMs with pruning, sweeps alpha out to 1.5 (a real LM's optimum sits well above the 0.9 I'd capped it at), and parallelises beam search across CPU cores. It still benchmarks every setting against greedy per-language and falls back if the LM loses — so a thin corpus is survivable, just not a win.
+
+All six scripts compile. Everything is blocked on that one 2.2 MB download.
+
+
+

@@ -1,0 +1,6 @@
+# Local laptop only — for inspect_data.py and validate_submission.py.
+# These two scripts do NOT need a GPU, torch, or transformers.
+# Everything the Kaggle scripts need is already preinstalled in the Kaggle image
+# except kenlm/pyctcdecode, which stage 3 pip-installs itself.
+pandas>=2.0
+numpy>=1.24
