@@ -98,13 +98,37 @@ def lang_from_id(utt_id: str) -> str | None:
 
 
 # ---------------------------------------------------------------- 1. what do we need to predict
-sample = pd.read_csv(ZINDI_DIR / "SampleSubmission.csv", escapechar="\\")
-SUB_ID = guess_col(sample, "id", "audio_id", "utt_id", "filename")
-SUB_TXT = guess_col(sample, "transcription", "transcript", "text", "target", "prediction")
-print(f"submission: {len(sample):,} rows, id={SUB_ID}, text={SUB_TXT}")
+# Two submission templates, disjoint sets with different id conventions:
+#   SampleSubmission.csv  4,253 rows, `lug_96114`  -> phase 1, language readable from the id
+#   Test_phase2.csv       1,500 rows, `ID_TBDTM`   -> phase 2, no language anywhere
+# Measured 30 Jul: zero id overlap. Predict the union, write one file per template, so whichever
+# phase is open we have a correctly-shaped file and never have to guess which one Zindi wants.
+TEMPLATES = []
+for fname in ("SampleSubmission.csv", "Test_phase2.csv"):
+    p = ZINDI_DIR / fname
+    if not p.exists():
+        print(f"  {fname}: absent, skipping")
+        continue
+    df = pd.read_csv(p, escapechar="\\")
+    tid = guess_col(df, "id", "audio_id", "utt_id", "filename")
+    ttxt = guess_col(df, "transcription", "transcript", "text", "target", "prediction")
+    if ttxt is None:                      # an id-only file is still a valid target list
+        ttxt = "Target"
+        df[ttxt] = ""
+    TEMPLATES.append((fname, df, tid, ttxt))
+    print(f"  {fname}: {len(df):,} rows, id={tid}, target={ttxt}")
 
-needed_ids = sample[SUB_ID].astype(str).tolist()
+assert TEMPLATES, "no submission template found in ZINDI_DIR"
+sample, SUB_ID, SUB_TXT = TEMPLATES[0][1], TEMPLATES[0][2], TEMPLATES[0][3]
+
+needed_ids, _seen = [], set()
+for _, df, tid, _ in TEMPLATES:
+    for i in df[tid].astype(str):
+        if i not in _seen:
+            _seen.add(i)
+            needed_ids.append(i)
 needed = set(needed_ids)
+print(f"submission contract: {len(needed_ids):,} unique ids across {len(TEMPLATES)} template(s)")
 
 known_lang = {}   # id -> iso3
 for i in needed_ids:                      # id prefix: exact, free, no model
@@ -113,6 +137,8 @@ for i in needed_ids:                      # id prefix: exact, free, no model
         known_lang[i] = lg
 print(f"language from id prefix: {len(known_lang):,} / {len(needed):,}")
 
+# If a Test csv ever ships an explicit language column it beats the prefix. Phase 1's does not,
+# and Phase 2's is `ID,Target` only — this loop is insurance, not the mechanism.
 for fname in ("Test.csv", "Test_phase2.csv"):
     p = ZINDI_DIR / fname
     if not p.exists():
@@ -125,7 +151,12 @@ for fname in ("Test.csv", "Test_phase2.csv"):
         for i, l in zip(df[cid].astype(str), df[clang].astype(str)):
             known_lang[i] = l.strip().lower()[:3]
 
-print(f"language known for {len(known_lang):,} / {len(needed):,} ids")
+# Phase 2 ids are `ID_` + 5 uniformly-random uppercase letters (letter frequencies 0.036-0.043
+# against a uniform 0.0385, all 26 used). No language, nothing to exploit. So on the set that
+# actually decides the prize, LID is not a fallback that never fires — it decides every clip.
+n_lid = len(needed) - len(known_lang)
+print(f"language known for {len(known_lang):,} / {len(needed):,} ids"
+      f"   ({n_lid:,} -> {LID_MODEL})")
 
 
 # ---------------------------------------------------------------- 2. resolve audio
@@ -254,15 +285,24 @@ for lang in LANGS:
 
 
 # ---------------------------------------------------------------- 5. write submission
-sub = sample.copy()
-sub[SUB_TXT] = sub[SUB_ID].astype(str).map(preds).fillna("")
-out = WORK / "submission_01_mms_zeroshot.csv"
-sub.to_csv(out, index=False)
+# One file per template, each keeping that template's own row order and column names.
+# Upload the one matching the phase that is currently open.
+SUFFIX = {"SampleSubmission.csv": "phase1", "Test_phase2.csv": "phase2"}
+for fname, df, tid, ttxt in TEMPLATES:
+    sub = df.copy()
+    sub[ttxt] = sub[tid].astype(str).map(preds).fillna("")
+    out = WORK / f"submission_01_mms_zeroshot_{SUFFIX.get(fname, Path(fname).stem)}.csv"
+    sub.to_csv(out, index=False)
 
-blank = int((sub[SUB_TXT].str.strip() == "").sum())
-print(f"\nwrote {out}")
-print(f"  rows={len(sub):,}  blank={blank:,} ({100*blank/len(sub):.1f}%)")
-print(sub.head(10).to_string())
+    blank = int((sub[ttxt].str.strip() == "").sum())
+    langs = pd.Series([known_lang.get(i, "??") for i in sub[tid].astype(str)]).value_counts()
+    print(f"\nwrote {out}")
+    print(f"  rows={len(sub):,}  blank={blank:,} ({100*blank/len(sub):.1f}%)")
+    print(f"  language mix: {langs.to_dict()}")
+    if blank:
+        # On phase 2 this almost always means the audio zip did not contain that id.
+        print(f"  WARNING: {blank:,} ids got no prediction and will score as pure deletions.")
+    print(sub.head(5).to_string())
 
 # Keep the language decisions — stage 3 reuses them instead of re-running LID.
 json.dump(known_lang, open(WORK / "lang_map.json", "w"))

@@ -276,12 +276,38 @@ json.dump(tuned, open(WORK / "lm_tuning.json", "w"), indent=2)
 
 
 # ---------------------------------------------------------------- 4. resolve test audio
-sample = pd.read_csv(ZINDI_DIR / "SampleSubmission.csv", escapechar="\\")
-SUB_ID = guess_col(sample, "id", "audio_id", "utt_id", "filename")
-SUB_TXT = guess_col(sample, "transcription", "transcript", "text", "target", "prediction")
-needed_ids = sample[SUB_ID].astype(str).tolist()
+# TWO submission templates, and they are disjoint sets with different shapes:
+#   SampleSubmission.csv  4,253 rows, ids like `lug_96114`  -> phase 1
+#   Test_phase2.csv       1,500 rows, ids like `ID_TBDTM`   -> phase 2, already ID/Target shaped
+# Measured 30 Jul: zero id overlap between them. We predict the union and write one file per
+# template, so whichever phase is open we have a correctly-shaped file ready and never have
+# to guess which one Zindi wants.
+TEMPLATES = []
+for fname in ("SampleSubmission.csv", "Test_phase2.csv"):
+    p = ZINDI_DIR / fname
+    if not p.exists():
+        print(f"  {fname}: absent, skipping")
+        continue
+    df = pd.read_csv(p, escapechar="\\")
+    tid = guess_col(df, "id", "audio_id", "utt_id", "filename")
+    ttxt = guess_col(df, "transcription", "transcript", "text", "target", "prediction")
+    if ttxt is None:                      # an id-only file is still a valid target list
+        ttxt = "Target"
+        df[ttxt] = ""
+    TEMPLATES.append((fname, df, tid, ttxt))
+    print(f"  {fname}: {len(df):,} rows, id={tid}, target={ttxt}")
+
+assert TEMPLATES, "no submission template found in ZINDI_DIR"
+sample, SUB_ID, SUB_TXT = TEMPLATES[0][1], TEMPLATES[0][2], TEMPLATES[0][3]
+
+needed_ids, _seen = [], set()
+for _, df, tid, _ in TEMPLATES:
+    for i in df[tid].astype(str):
+        if i not in _seen:
+            _seen.add(i)
+            needed_ids.append(i)
 needed = set(needed_ids)
-print(f"submission contract: {len(needed_ids):,} rows, id={SUB_ID}, target={SUB_TXT}")
+print(f"submission contract: {len(needed_ids):,} unique ids across {len(TEMPLATES)} template(s)")
 
 audio_store, known_lang = {}, {}
 if Path("/kaggle/input/waxal-ckpt/lang_map.json").exists():
@@ -292,8 +318,20 @@ for i in needed_ids:
     lg = lang_from_id(i)
     if lg:
         known_lang[i] = lg
-print(f"language from id prefix: {sum(1 for i in needed_ids if i in known_lang):,}"
-      f" / {len(needed_ids):,}")
+n_prefix = sum(1 for i in needed_ids if i in known_lang)
+print(f"language from id prefix: {n_prefix:,} / {len(needed_ids):,}")
+
+# Phase 2 ids are `ID_` + 5 uniformly-random uppercase letters (verified: letter frequencies
+# 0.036-0.043 against a uniform 0.0385, all 26 letters used). There is no language in them and
+# nothing to exploit. So on the set that actually decides the prize, LID is not a fallback that
+# never fires — it is load-bearing for every single clip, and a LID error means decoding with
+# the wrong KenLM, which corrupts the whole utterance rather than costing a few WER points.
+n_lid = len(needed_ids) - n_prefix
+if n_lid:
+    print(f"*** {n_lid:,} ids carry no language ({100*n_lid/len(needed_ids):.0f}%) -> "
+          f"{LID_MODEL} decides their decoder. Check the distribution it produces below "
+          f"against the ~44/41/15 lin/sna/lug split of the corpus; a wildly different "
+          f"split means LID is misfiring and the submission is not trustworthy.")
 
 # An explicit language column, if a future Test csv ever carries one, overrides the prefix.
 for fname in ("Test.csv", "Test_phase2.csv"):
@@ -404,10 +442,21 @@ with multiprocessing.get_context("fork").Pool(os.cpu_count()) as pool:
                 print(f"  {k}/{len(ids)}")
         flush()
 
-sub = sample.copy()
-sub[SUB_TXT] = sub[SUB_ID].astype(str).map(preds).fillna("")
-out = WORK / "submission_03_w2vbert_lm.csv"
-sub.to_csv(out, index=False)
-blank = int((sub[SUB_TXT].str.strip() == "").sum())
-print(f"\nwrote {out}: rows={len(sub):,} blank={blank:,}")
-print(sub.head(10).to_string())
+# One file per template, each keeping that template's own row order and column names.
+# Upload the one matching the phase that is currently open.
+SUFFIX = {"SampleSubmission.csv": "phase1", "Test_phase2.csv": "phase2"}
+for fname, df, tid, ttxt in TEMPLATES:
+    sub = df.copy()
+    sub[ttxt] = sub[tid].astype(str).map(preds).fillna("")
+    out = WORK / f"submission_03_w2vbert_lm_{SUFFIX.get(fname, Path(fname).stem)}.csv"
+    sub.to_csv(out, index=False)
+
+    blank = int((sub[ttxt].str.strip() == "").sum())
+    langs = pd.Series([known_lang.get(i, "??") for i in sub[tid].astype(str)]).value_counts()
+    print(f"\nwrote {out}")
+    print(f"  rows={len(sub):,}  blank={blank:,} ({100*blank/len(sub):.1f}%)")
+    print(f"  language mix: {langs.to_dict()}")
+    if blank:
+        # On phase 2 this almost always means the audio zip did not contain that id.
+        print(f"  WARNING: {blank:,} ids got no prediction and will score as pure deletions.")
+    print(sub.head(5).to_string())

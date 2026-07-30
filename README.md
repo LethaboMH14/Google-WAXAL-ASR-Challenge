@@ -85,8 +85,9 @@ that is an explicit disqualification under the rules. We do not do that. See §6
 > "Metadata and auxiliary information such as language, speaker identity, gender ... will not
 > be provided."
 
-So a per-language model keyed off a `language` column silently breaks on the set that
-actually counts. Our design is therefore:
+**Confirmed on the real file (§7e):** Phase 2 IDs are `ID_` + 5 random letters — no language
+column, and no language in the ID either. So a per-language model keyed off metadata, *or* off
+an ID prefix, silently breaks on the set that actually counts. Our design is therefore:
 
 - **one shared multilingual CTC acoustic model** (shared Latin-script vocab across lin/sna/lug), plus
 - **explicit language ID** from the audio (`facebook/mms-lid-256`), used only to pick which
@@ -251,6 +252,7 @@ metadata (§3) and may strip the prefix.
 | `Train.csv` | 38,199 | `id`, `transcription`, `language`, `original_split` |
 | `Test.csv` | 4,253 | `ID` — **that is all** |
 | `SampleSubmission.csv` | 4,253 | `ID`, `Target` |
+| `Test_phase2.csv` | 1,500 | `ID`, `Target` (all blank) — both the Phase 2 ID list **and** its submission template |
 
 `Test.csv` carries no language column and no audio path, so audio has to come from the HF
 `test` split — loaded **audio-only**, with `transcription`/`text` dropped on sight by the rules
@@ -270,15 +272,37 @@ The organisers promised the Phase 2 audio "approximately one week before the cha
 and delivered it on 27 Jul. Since **final rankings and prizes are decided on Phase 2, not the
 Phase 1 leaderboard**, this is the highest-priority missing input.
 
-Its ID list, **`Test_phase2.csv` (14.7 KB), is missing from our copy and should not be** — it is
-on the Zindi **Data** tab, but the bulk-download zip's `manifest-*.json` names only four files
-and omits it, so "Download all" doesn't give it to you. Download it separately into
-`data/zindi/`. Stages 1 and 3 already glob for it and `wget` the audio zip into
-`/kaggle/working` — pull the 727 MB inside a Kaggle notebook, not over a home connection.
+Its ID list, **`Test_phase2.csv`, is not in the bulk-download zip** — the zip's `manifest-*.json`
+names only four files and omits it, so "Download all" doesn't give it to you. It is on the Zindi
+**Data** tab as a separate download. It is now in `data/zindi/`. Stages 1 and 3 glob for it and
+`wget` the audio zip into `/kaggle/working` — pull the 727 MB inside a Kaggle notebook, not over
+a home connection.
 
-**Unknown until we have that file:** whether Phase 2 IDs keep the `lin_`/`sna_`/`lug_` prefix.
-"Metadata ... will not be provided" implies not, which would make `mms-lid-256` load-bearing on
-the set that actually pays rather than a fallback that never fires.
+**e. Phase 2 IDs carry no language, and that changes what LID is for.** Profiled the real file
+on 30 Jul:
+
+```
+rows                       1,500          (vs 4,253 in phase 1)
+columns                    ID, Target     Target 100% empty
+all match ^ID_[A-Z]{5}$    True           e.g. ID_TBDTM
+any lin/sna/lug prefix     False
+overlap with phase 1 ids   0
+letter freq over 26        0.0360 - 0.0429  (uniform = 0.0385, all 26 letters used)
+```
+
+Five uniformly-random uppercase letters. There is no language in the ID and no structure to
+exploit. So `lang_from_id()` resolves **100% of Phase 1 and 0% of Phase 2**, and on the set that
+actually decides the prize `mms-lid-256` is not a fallback that never fires — **it picks the
+decoder for every single clip.** A LID error is not a few WER points: it decodes the utterance
+against the wrong KenLM and corrupts the whole line. Both stages therefore constrain the LID
+argmax to `{lin, sna, lug}` and print the resulting language mix; compare it against the corpus
+split (~44/41/15 lin/sna/lug) — a wildly different mix means LID is misfiring and the submission
+is not trustworthy.
+
+The two templates are **disjoint sets with different shapes**, so stages 1 and 3 predict the
+union of both ID lists and write one correctly-shaped file per template
+(`..._phase1.csv`, `..._phase2.csv`). Upload whichever matches the phase that is open; there is
+never a guess about which file Zindi wants.
 
 **Still open:** whether Zindi's server-side scorer matches that starter-notebook reference.
 The cheap hedge is to spend two of the five daily slots on the same predictions with and

@@ -1,7 +1,11 @@
 """
-Validate a submission CSV against SampleSubmission before uploading.
+Validate a submission CSV against the right Zindi template before uploading.
 
     python local/validate_submission.py path/to/submission.csv
+
+There are two templates — SampleSubmission.csv (phase 1, 4,253 rows) and Test_phase2.csv
+(phase 2, 1,500 rows) — and their id sets are disjoint. The template is chosen by matching
+the file's ids, so you cannot accidentally validate a phase 2 file against phase 1 rules.
 
 You get 5 submissions a day and 200 total. A rejected file still costs you the round trip,
 and a silently malformed one costs you a slot and a misleading score. Run this every time.
@@ -28,7 +32,8 @@ for _stream in (sys.stdout, sys.stderr):
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SAMPLE = ROOT / "data" / "zindi" / "SampleSubmission.csv"
+ZINDI = ROOT / "data" / "zindi"
+TEMPLATES = {"phase 1": ZINDI / "SampleSubmission.csv", "phase 2": ZINDI / "Test_phase2.csv"}
 
 
 def guess_col(df, *cands):
@@ -43,17 +48,48 @@ def guess_col(df, *cands):
     return None
 
 
-def main(path: str) -> int:
-    if not SAMPLE.exists():
-        print(f"missing {SAMPLE}")
-        return 1
+def pick_template(sub: pd.DataFrame):
+    """Choose the template this file is trying to be, by id overlap.
 
+    The two id sets are disjoint (verified 30 Jul), so overlap is unambiguous — no guessing
+    from row counts or filenames. Validating a phase 2 file against phase 1 would report a
+    4,253-row mismatch on a perfectly correct submission, which is exactly the kind of false
+    alarm that gets a good file thrown away at 2am.
+    """
+    sid = guess_col(sub, "id", "audio_id", "utt_id", "filename")
+    ids = set(sub[sid].astype(str)) if sid else set()
+    best, best_ov, loaded = None, -1, {}
+    for name, p in TEMPLATES.items():
+        if not p.exists():
+            continue
+        df = pd.read_csv(p, escapechar="\\")
+        loaded[name] = df
+        tid = guess_col(df, "id", "audio_id", "utt_id", "filename")
+        ov = len(ids & set(df[tid].astype(str))) if tid else 0
+        if ov > best_ov:
+            best, best_ov = name, ov
+    if not loaded:
+        return None, None, None
+    if best_ov <= 0:                       # matches neither — fall back to whatever we have
+        best = next(iter(loaded))
+        return best, loaded[best], f"ids match NEITHER template; comparing against {best}"
+    return best, loaded[best], None
+
+
+def main(path: str) -> int:
     # escapechar: Zindi backslash-escapes quotes inside quoted fields, which the C parser
     # otherwise reads as a field terminator (23 ragged rows in Train.csv).
-    sample = pd.read_csv(SAMPLE, escapechar="\\")
     sub = pd.read_csv(path, escapechar="\\")
+    phase, sample, note = pick_template(sub)
+    if sample is None:
+        print(f"no template found in {ZINDI} (need SampleSubmission.csv or Test_phase2.csv)")
+        return 1
+
     fails: list[str] = []
     warns: list[str] = []
+    print(f"validating as {phase} ({len(sample):,} rows expected)")
+    if note:
+        fails.append(note)
 
     # --- structure
     if list(sub.columns) != list(sample.columns):

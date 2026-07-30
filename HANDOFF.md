@@ -92,7 +92,7 @@ data/zindi/
   Test.csv                          4,253 rows | ID   <- that is the ONLY column
   SampleSubmission.csv              4,253 rows | ID, Target
   Waxal_Challenge_Starter_Code.ipynb           organisers' reference implementation
-  Test_phase2.csv                  MISSING — see below, get this on day one
+  Test_phase2.csv                   1,500 rows | ID, Target   <- phase 2, the one that pays
 ```
 
 If `data/zindi/` is empty when you clone, download the files yourself from the competition
@@ -112,21 +112,43 @@ is explicitly developmental:
 > experimentation. Final rankings and prize winners will be determined based on performance on
 > the Phase 2 evaluation dataset."
 
-Two things to get, and neither is optional:
+Two things you need, and one of them is now done:
 
-1. **`Test_phase2.csv` (14.7 KB) — Zindi Data tab, download it by itself.** The Data tab lists
-   five files but the bulk zip's `manifest-*.json` names only four and omits this one, so
-   "Download all" silently skips it. It's the ID list: which clips to predict, and the row
-   order the submission must be in. Put it in `data/zindi/` and tell me it's there.
+1. ~~`Test_phase2.csv`~~ **— got it, it's in the repo.** You were right that it wasn't in the
+   bulk zip: the Data tab lists five files but the zip's `manifest-*.json` names only four and
+   omits this one, so "Download all" silently skips it. Lethabo pulled it separately on 30 Jul.
 2. **The 727 MB audio zip — pull it *inside a Kaggle notebook*, not onto your laptop.** Stages
    1 and 3 already `wget` that exact URL into `/kaggle/working`. Kaggle has fast egress and
    20 GB of scratch disk; a home connection does not need to carry this.
 
-**Tell me two things the moment you have `Test_phase2.csv`:** how many rows, and whether the
-IDs still start with `lin_` / `sna_` / `lug_`. If the prefix is gone — which is what "metadata
-will not be provided" implies — then `mms-lid-256` language ID is doing real work on the set
-that pays, and it is worth spending a submission slot checking it before the deadline. If the
-prefix survived, routing stays free and we have one less thing to worry about.
+### What `Test_phase2.csv` told us — the answer is the bad case
+
+The open question was whether Phase 2 IDs keep the `lin_`/`sna_`/`lug_` prefix that makes
+language routing free. Profiled the real file:
+
+```
+rows                       1,500          (phase 1 has 4,253)
+columns                    ID, Target     Target 100% empty
+all match ^ID_[A-Z]{5}$    True           e.g. ID_TBDTM
+any lin/sna/lug prefix     False
+overlap with phase 1 ids   0
+letter freq over 26        0.0360 - 0.0429  (uniform = 0.0385, all 26 used)
+```
+
+Five uniformly-random uppercase letters. **No language, and nothing to exploit.** Two
+consequences you need to hold onto while you run this:
+
+- **`mms-lid-256` is now load-bearing.** It resolves 0% of Phase 2 from the ID, so LID picks the
+  decoder for all 1,500 clips. A LID error isn't a few WER points — it decodes the clip against
+  the wrong KenLM and corrupts the entire line. Stages 1 and 3 constrain the LID argmax to
+  `{lin, sna, lug}` (an unconstrained argmax over 256 languages will happily emit `swh` for a
+  Bantu clip) and print the resulting language mix. **Check that mix against ~44/41/15
+  lin/sna/lug.** A wildly different split means LID is misfiring and the submission is junk —
+  tell me before you upload it.
+- **Two submission shapes, zero overlap.** Phase 1 wants 4,253 rows in SampleSubmission order;
+  Phase 2 wants 1,500 rows in Test_phase2 order. Stages 1 and 3 predict the *union* and write
+  **one file per template** — `..._phase1.csv` and `..._phase2.csv`. Upload the one matching
+  whichever phase Zindi has open. Never hand-edit one into the other.
 
 **Three things about this data you must not rediscover the hard way:**
 
@@ -189,7 +211,8 @@ get a real score on the board today and to prove the whole pipeline works — au
 language routing → decode → submission format — **before** we spend 8 GPU-hours training.
 
 - Attach: `waxal-zindi`. Internet: **ON**.
-- Output: `/kaggle/working/submission_01_mms_zeroshot.csv` and `lang_map.json`.
+- Output: `/kaggle/working/submission_01_mms_zeroshot_phase1.csv`, `..._phase2.csv`,
+  and `lang_map.json` (the language decisions — stage 3 reuses them instead of re-running LID).
 - Expect roughly mid-pack. Zero-shot MMS measured 44.7 / 36.9 / 32.1 WER on this corpus. If it
   scores near zero, the format is wrong — check §6 before resubmitting.
 
@@ -221,7 +244,10 @@ Shona versus greedy decoding.
 - It sweeps alpha/beta on the validation split and picks the best per language. It compares
   against greedy and **falls back to greedy if the LM loses** — that's deliberate, not a bug.
 - If it warns that the best alpha landed at the edge of the grid, tell me; the grid needs widening.
-- Output: the final submission CSV.
+- Output: `submission_03_w2vbert_lm_phase1.csv` and `..._phase2.csv` — the final submissions.
+  It also prints the language mix per file. **Sanity-check it against ~44/41/15 lin/sna/lug
+  before you upload the phase 2 one** — that mix is the only thing standing between us and
+  1,500 clips decoded against the wrong language model.
 
 ### Stage 4 — submit
 
@@ -237,9 +263,14 @@ See §6.
 python local/validate_submission.py path/to/submission.csv
 ```
 
-It checks the columns, row count and the exact ID set against `SampleSubmission.csv`, and
-profiles the predictions against the training distribution. **If it says FAIL, do not upload.**
-A malformed file still costs you one of the 5 daily slots and gives a misleading score.
+It works out which phase your file is by matching its IDs against both templates (the two ID
+sets are disjoint, so there's no ambiguity), prints which one it picked, then checks columns,
+row count and the exact ID set against *that* template and profiles the predictions against the
+training distribution. **If it says FAIL, do not upload.** A malformed file still costs you one
+of the 5 daily slots and gives a misleading score.
+
+If it says `validating as phase 1` when you meant to upload phase 2, you grabbed the wrong file
+out of `/kaggle/working` — that alone is worth the 5 seconds this takes.
 
 Then: competition page → **Submit** → drag the CSV → add a comment saying which stage it came
 from (you will not remember on Sunday) → Submit.
@@ -297,6 +328,21 @@ Both of the things you flagged were real and are in. Pull before you run anythin
   we had to match the reference's casing. The scorer lowercases both sides, so casing is free.
   That block is now a *consistency check* against the settled policy, quoting the notebook as
   the source of truth, and it only complains if the data stops matching README §7b.
+
+And the thing you couldn't get:
+
+- **`Test_phase2.csv` is in the repo now.** Your read was right — it's on the Data tab but not
+  in the bulk zip. It answered the open question the wrong way: no language prefix (§3). Three
+  code changes came out of that, all pushed:
+  - Stages 1 and 3 now read **both** templates, predict the union of their IDs, and write one
+    correctly-shaped file per template. Before this, stage 1 built its ID list from
+    `SampleSubmission.csv` alone and would have silently dropped all 1,500 Phase 2 clips.
+  - Both stages print the LID language mix per output file, because LID is now deciding 100%
+    of the set that pays.
+  - `validate_submission.py` picks its template by ID overlap instead of hard-coding
+    `SampleSubmission.csv`. It would otherwise have failed a *correct* Phase 2 file with a
+    "row count 1,500 != 4,253" error, which is precisely the false alarm that gets a good
+    submission binned.
 
 Good catches. Keep doing that.
 
