@@ -256,12 +256,29 @@ metadata (§3) and may strip the prefix.
 `test` split — loaded **audio-only**, with `transcription`/`text` dropped on sight by the rules
 guard in stages 1 and 3.
 
-**`Test_phase2.csv` (14.7 KB) is missing from our copy, and it should not be.** It is listed on
-the Zindi **Data** tab, but the bulk-download zip's `manifest-*.json` names only four files and
-omits it — so the "Download all" button does not give you it. **Download it separately** and
-drop it in `data/zindi/`. Stages 1 and 3 already glob for it and for
-`https://storage.googleapis.com/waxalphase2/audio.zip`; at 14.7 KB it is an ID list, so the
-audio still comes from that zip endpoint.
+**Phase 2 is already open, and we are late to it.** Verified 30 Jul:
+
+```
+$ curl -sI https://storage.googleapis.com/waxalphase2/audio.zip
+HTTP/1.1 200 OK
+Content-Type: application/zip
+Content-Length: 762423240                        # 727 MB
+Last-Modified: Mon, 27 Jul 2026 07:58:48 GMT
+```
+
+The organisers promised the Phase 2 audio "approximately one week before the challenge closes"
+and delivered it on 27 Jul. Since **final rankings and prizes are decided on Phase 2, not the
+Phase 1 leaderboard**, this is the highest-priority missing input.
+
+Its ID list, **`Test_phase2.csv` (14.7 KB), is missing from our copy and should not be** — it is
+on the Zindi **Data** tab, but the bulk-download zip's `manifest-*.json` names only four files
+and omits it, so "Download all" doesn't give it to you. Download it separately into
+`data/zindi/`. Stages 1 and 3 already glob for it and `wget` the audio zip into
+`/kaggle/working` — pull the 727 MB inside a Kaggle notebook, not over a home connection.
+
+**Unknown until we have that file:** whether Phase 2 IDs keep the `lin_`/`sna_`/`lug_` prefix.
+"Metadata ... will not be provided" implies not, which would make `mms-lid-256` load-bearing on
+the set that actually pays rather than a fallback that never fires.
 
 **Still open:** whether Zindi's server-side scorer matches that starter-notebook reference.
 The cheap hedge is to spend two of the five daily slots on the same predictions with and

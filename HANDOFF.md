@@ -28,13 +28,13 @@ Read `README.md` after this file if you want the reasoning. This file is the ins
 
 These are quoted from the Zindi rules page. Break any one and the whole thing is void.
 
-1. **Form the team on Zindi BEFORE you touch the code.**
+1. **We are already a registered team on Zindi — keep it that way.**
    > "Multiple accounts, or sharing of code and information across accounts not in teams, is
    > not allowed and will lead to disqualification."
 
-   You and I are two accounts. The moment you have my code and we are not a registered team,
-   we are in breach. Go to the competition page → **Team** tab → send/accept the invite.
-   **Do this first. Today.** Max team size is 4.
+   Confirmed done. That is what makes it legal for you to have this code. Max team size is 4,
+   so if anyone else joins, add them on the **Team** tab *before* sharing anything with them.
+   Submissions go under the team, so don't create a second account for any reason.
 
 2. **Never join the HuggingFace `test` labels onto the submission.**
    > "Any Phase 1 submission that uses the publicly available ground-truth labels for the
@@ -87,17 +87,34 @@ If `data/zindi/` is empty when you clone, download the files yourself from the c
 page → **Data** tab (you need to be logged in and have accepted the terms). Put them in
 `data/zindi/` with exactly those filenames.
 
-### Download `Test_phase2.csv` separately — the "Download all" button skips it
+### PHASE 2 IS ALREADY OPEN — this is the most urgent item in this document
 
-The Data tab lists **five** files. The bulk-download zip contains **four**: its own
-`manifest-*.json` names only `Train.csv`, `Test.csv`, `SampleSubmission.csv` and the starter
-notebook. `Test_phase2.csv` (14.7 KB) is on the page but not in the zip.
+Checked 30 Jul: `https://storage.googleapis.com/waxalphase2/audio.zip` returns **HTTP 200,
+762,423,240 bytes (727 MB), Last-Modified 27 Jul 2026**. The organisers said Phase 2 audio
+drops "approximately one week before the challenge closes" and it did, three days ago.
 
-Phase 2 is what decides the prizes. Go to the Data tab and click that one file on its own, put
-it in `data/zindi/`, and tell me it's there. At 14.7 KB it is an ID list only — the Phase 2
-audio comes from `https://storage.googleapis.com/waxalphase2/audio.zip`, which stages 1 and 3
-already try to fetch. **If that URL 404s, say so immediately** — it means the audio isn't
-published yet and we need to watch the discussion board for it.
+**Phase 2 is what determines the final rankings and the prize money.** The Phase 1 leaderboard
+is explicitly developmental:
+
+> "The Phase 1 leaderboard is designed to support model development, collaboration and
+> experimentation. Final rankings and prize winners will be determined based on performance on
+> the Phase 2 evaluation dataset."
+
+Two things to get, and neither is optional:
+
+1. **`Test_phase2.csv` (14.7 KB) — Zindi Data tab, download it by itself.** The Data tab lists
+   five files but the bulk zip's `manifest-*.json` names only four and omits this one, so
+   "Download all" silently skips it. It's the ID list: which clips to predict, and the row
+   order the submission must be in. Put it in `data/zindi/` and tell me it's there.
+2. **The 727 MB audio zip — pull it *inside a Kaggle notebook*, not onto your laptop.** Stages
+   1 and 3 already `wget` that exact URL into `/kaggle/working`. Kaggle has fast egress and
+   20 GB of scratch disk; a home connection does not need to carry this.
+
+**Tell me two things the moment you have `Test_phase2.csv`:** how many rows, and whether the
+IDs still start with `lin_` / `sna_` / `lug_`. If the prefix is gone — which is what "metadata
+will not be provided" implies — then `mms-lid-256` language ID is doing real work on the set
+that pays, and it is worth spending a submission slot checking it before the deadline. If the
+prefix survived, routing stays free and we have one less thing to worry about.
 
 **Three things about this data you must not rediscover the hard way:**
 
@@ -244,10 +261,12 @@ second opinion on:
    leaving punctuation alone, so we keep punctuation. But I can't verify Zindi's *server-side*
    scorer does the same. Cheap test: spend two of the five daily slots on identical predictions
    with and without punctuation and read the delta off the leaderboard. Worth doing on day one.
-2. **Phase 2.** `Test_phase2.csv` is published on the Data tab but was left out of the bulk
-   zip (§3), so grab it manually. Then confirm whether
-   `https://storage.googleapis.com/waxalphase2/audio.zip` actually serves audio yet. That set
-   decides the prize and we currently have neither half of it. Check the discussion board daily.
+2. **Whether we are even optimising the right thing.** Phase 2 is open (§3) and it is what
+   pays, but every score we can *see* comes from Phase 1. Those are different distributions —
+   Phase 2 is new speakers and new recordings by construction. If tuning alpha/beta hard
+   against Phase 1 starts looking like overfitting to you, say so; the safer choice is the
+   setting that wins on the *validation* split, not the one that wins on the public
+   leaderboard. That judgement call is worth more than a few decimal places.
 
 ---
 
