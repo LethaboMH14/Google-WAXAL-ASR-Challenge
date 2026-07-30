@@ -242,10 +242,10 @@ processor.save_pretrained(OUTDIR)
 from datasets import Audio, interleave_datasets, load_dataset
 
 
-# datasets >= 4 decodes Audio columns through torchcodec, which pins against specific torch
-# builds and needs FFmpeg present. On a machine we don't control that is a dependency we can
-# lose a run to — it raised ImportError on Lightning with torch 2.8. Ask datasets for raw bytes
-# (Audio(decode=False)) and decode with soundfile, which we already depend on.
+# datasets >= 4 decodes Audio columns through torchcodec, which dlopens FFmpeg's shared
+# libraries at import. A bare Lightning studio has neither — scripts/setup_lightning.sh installs
+# both. This helper is the single place audio becomes 16 kHz mono float32, and it takes either a
+# decoded cell or raw bytes, so every caller resamples identically.
 def decode_audio_cell(cell) -> np.ndarray:
     """An undecoded datasets audio cell -> 16 kHz mono float32."""
     import io
@@ -271,7 +271,7 @@ def build(split: str):
     parts, probs = [], []
     for lang, cfg in HF_CONFIGS.items():
         ds = load_dataset("google/WaxalNLP", cfg, split=split, streaming=True)
-        ds = ds.cast_column("audio", Audio(decode=False))   # decode_audio_cell() resamples
+        ds = ds.cast_column("audio", Audio(sampling_rate=16000))
         if split == "train":
             ds = ds.shuffle(seed=SEED, buffer_size=1500)
         parts.append(ds)

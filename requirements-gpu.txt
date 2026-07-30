@@ -16,4 +16,5 @@ pandas>=2.0
 numpy>=1.24,<2.1            # numpy 2.1+ still trips some audio wheels
 sentencepiece>=0.2
 pyctcdecode>=0.5            # beam search + shallow fusion
+torchcodec                 # datasets>=4 decodes Audio through this; needs ffmpeg (see scripts/setup_lightning.sh)
 huggingface-hub>=0.24

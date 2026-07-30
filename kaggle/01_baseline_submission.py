@@ -184,11 +184,12 @@ print(f"language known for {len(known_lang):,} / {len(needed):,} ids"
 
 
 # ---------------------------------------------------------------- audio decoding
-# datasets >= 4 decodes Audio columns through torchcodec, which pins against specific torch
-# builds and needs FFmpeg present. On a machine we don't control that is a dependency we can
-# lose a run to — it raised ImportError on Lightning with torch 2.8. We already decode the
-# phase 2 zip with soundfile, so ask datasets for raw bytes (Audio(decode=False)) and use the
-# same decoder for both paths. One less moving part, and identical resampling either way.
+# datasets >= 4 decodes Audio columns through torchcodec, which dlopens FFmpeg's shared
+# libraries at import. A bare Lightning studio has neither, and the failure lands as an
+# ImportError deep inside a dataset iterator long after the run started — so both are installed
+# by scripts/setup_lightning.sh. This helper is the single place audio becomes 16 kHz mono
+# float32, and it takes either a decoded cell or raw bytes, so the HF path and the phase 2 zip
+# path cannot drift apart.
 def decode_audio_cell(cell) -> np.ndarray:
     """An undecoded datasets audio cell -> 16 kHz mono float32."""
     import io
@@ -246,10 +247,7 @@ if still_missing:
     print(f"{len(still_missing):,} ids unresolved -> pulling audio from HF test splits")
     for lang, cfg in HF_CONFIGS.items():
         ds = load_dataset("google/WaxalNLP", cfg, split="test", streaming=True)
-        # Order matters: remove_columns() on a streaming dataset is implemented as a map, which
-        # freezes the decoding formatter underneath it. Cast first or Audio(decode=False) is
-        # silently ignored and datasets still reaches for torchcodec.
-        ds = ds.cast_column("audio", Audio(decode=False))      # see decode_audio_cell()
+        ds = ds.cast_column("audio", Audio(sampling_rate=16000))
         # === RULES GUARD: the labels in this split may never be read. ===
         ds = ds.remove_columns([c for c in ("transcription", "text") if c in ds.column_names])
         hits = 0
