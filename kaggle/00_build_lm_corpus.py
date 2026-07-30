@@ -35,6 +35,7 @@ Then: Kaggle -> Output -> New Dataset -> name it `waxal-lm`, so stage 3 can moun
 """
 
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -99,6 +100,14 @@ INDOMAIN_REPEAT = 10
 # Sources, per language. `hf` entries are (repo, config, split, text_column).
 # Each is tried independently and failures are non-fatal — HF configs get renamed, and a dead
 # source must not take the whole corpus down with it.
+# FLEURS is an *audio* dataset. We want one text column out of it, but `streaming=True` still
+# pulls the multi-GB wav shards, because that is how the archives are packed — measured on
+# Lightning as ~10 minutes of 1% CPU and no output per language. It contributes a few thousand
+# read-speech sentences against ~35k we already have, so it is off by default and the corpus is
+# built without it. Turn it back on when wall-clock is cheap:
+#     WAXAL_INCLUDE_FLEURS=1 python kaggle/00_build_lm_corpus.py
+INCLUDE_AUDIO_DATASETS = os.getenv("WAXAL_INCLUDE_FLEURS", "0") == "1"
+
 SOURCES: dict[str, list[dict]] = {
     "lin": [
         {"repo": "wikimedia/wikipedia", "config": "20231101.ln", "split": "train", "col": "text",
@@ -106,7 +115,7 @@ SOURCES: dict[str, list[dict]] = {
         {"repo": "masakhane/masakhanews", "config": "lin", "split": "train", "col": "text",
          "licence": "AFL-3.0"},
         {"repo": "google/fleurs", "config": "ln_cd", "split": "train", "col": "transcription",
-         "licence": "CC-BY-4.0"},
+         "licence": "CC-BY-4.0", "audio_heavy": True},
     ],
     "sna": [
         {"repo": "wikimedia/wikipedia", "config": "20231101.sn", "split": "train", "col": "text",
@@ -114,7 +123,7 @@ SOURCES: dict[str, list[dict]] = {
         {"repo": "masakhane/masakhanews", "config": "sna", "split": "train", "col": "text",
          "licence": "AFL-3.0"},
         {"repo": "google/fleurs", "config": "sn_zw", "split": "train", "col": "transcription",
-         "licence": "CC-BY-4.0"},
+         "licence": "CC-BY-4.0", "audio_heavy": True},
     ],
     "lug": [
         {"repo": "wikimedia/wikipedia", "config": "20231101.lg", "split": "train", "col": "text",
@@ -122,7 +131,7 @@ SOURCES: dict[str, list[dict]] = {
         {"repo": "masakhane/masakhanews", "config": "lug", "split": "train", "col": "text",
          "licence": "AFL-3.0"},
         {"repo": "google/fleurs", "config": "lg_ug", "split": "train", "col": "transcription",
-         "licence": "CC-BY-4.0"},
+         "licence": "CC-BY-4.0", "audio_heavy": True},
     ],
 }
 
@@ -232,6 +241,11 @@ for lang in LANGS:
 
     for src in SOURCES[lang]:
         tag = f"{src['repo']}:{src['config']}"
+        if src.get("audio_heavy") and not INCLUDE_AUDIO_DATASETS:
+            print(f"  {tag:<42}: skipped (audio dataset — set WAXAL_INCLUDE_FLEURS=1 to use)")
+            used.append({"source": tag, "sentences": 0, "words": 0, "skipped": "audio_heavy",
+                         "licence": src["licence"]})
+            continue
         try:
             from datasets import load_dataset
             ds = load_dataset(src["repo"], src["config"], split=src["split"], streaming=True)
