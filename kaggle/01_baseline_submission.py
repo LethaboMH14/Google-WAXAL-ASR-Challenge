@@ -246,9 +246,12 @@ if still_missing:
     print(f"{len(still_missing):,} ids unresolved -> pulling audio from HF test splits")
     for lang, cfg in HF_CONFIGS.items():
         ds = load_dataset("google/WaxalNLP", cfg, split="test", streaming=True)
+        # Order matters: remove_columns() on a streaming dataset is implemented as a map, which
+        # freezes the decoding formatter underneath it. Cast first or Audio(decode=False) is
+        # silently ignored and datasets still reaches for torchcodec.
+        ds = ds.cast_column("audio", Audio(decode=False))      # see decode_audio_cell()
         # === RULES GUARD: the labels in this split may never be read. ===
         ds = ds.remove_columns([c for c in ("transcription", "text") if c in ds.column_names])
-        ds = ds.cast_column("audio", Audio(decode=False))      # see decode_audio_cell()
         hits = 0
         for row in ds:
             rid = str(row["id"])

@@ -432,9 +432,11 @@ missing = needed - set(audio_store)
 if missing:
     for lang, cfg in HF_CONFIGS.items():
         ds = load_dataset("google/WaxalNLP", cfg, split="test", streaming=True)
+        # Cast before remove_columns: the latter is a map on streaming datasets and freezes the
+        # decoding formatter, which makes Audio(decode=False) a no-op.
+        ds = ds.cast_column("audio", Audio(decode=False))   # see decode_audio_cell()
         # RULES GUARD: never read labels from the test split.
         ds = ds.remove_columns([c for c in ("transcription", "text") if c in ds.column_names])
-        ds = ds.cast_column("audio", Audio(decode=False))   # see decode_audio_cell()
         for row in ds:
             rid = str(row["id"])
             if rid in missing and rid not in audio_store:
