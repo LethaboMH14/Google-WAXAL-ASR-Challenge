@@ -67,6 +67,23 @@ else:
         return WORK                                       # everything in one persistent tree
 print(f"env={ENV}  work={WORK}  zindi={ZINDI_DIR}")
 
+# ---------------------------------------------------------------- datasets version guard
+# datasets 4.0 decodes Audio columns via torchcodec, whose prebuilt .so is linked against a
+# specific libtorch ABI and which declares no torch dependency on PyPI — so pip installs a wheel
+# that may not match the host's torch, and it fails as `undefined symbol: torch_from_blob` from
+# inside the dataset iterator, i.e. after models and audio have already downloaded. Three stage-1
+# runs died that way. Fail here instead, in the first second, with the fix on screen.
+import datasets as _ds
+
+if int(_ds.__version__.split(".")[0]) >= 4:
+    raise SystemExit(
+        f"\n  datasets {_ds.__version__} is installed; this pipeline needs 3.x."
+        "\n  4.0 moved audio decoding to torchcodec (see requirements-gpu.txt)."
+        "\n\n      pip install -q 'datasets>=3.6,<4.0'"
+        "\n\n  Then re-run this script."
+    )
+
+
 PHASE2_URL = "https://storage.googleapis.com/waxalphase2/audio.zip"
 
 LANGS = ["lin", "sna", "lug"]                           # Lingala, Shona, Luganda
@@ -184,12 +201,11 @@ print(f"language known for {len(known_lang):,} / {len(needed):,} ids"
 
 
 # ---------------------------------------------------------------- audio decoding
-# datasets >= 4 decodes Audio columns through torchcodec, which dlopens FFmpeg's shared
-# libraries at import. A bare Lightning studio has neither, and the failure lands as an
-# ImportError deep inside a dataset iterator long after the run started — so both are installed
-# by scripts/setup_lightning.sh. This helper is the single place audio becomes 16 kHz mono
-# float32, and it takes either a decoded cell or raw bytes, so the HF path and the phase 2 zip
-# path cannot drift apart.
+# requirements-gpu.txt pins datasets < 4 so Audio columns decode through soundfile, not
+# torchcodec — the note at the bottom of that file explains why, and the guard at the top of this
+# one enforces it. This helper is the single place audio becomes 16 kHz mono float32, and it
+# takes either a decoded cell or raw bytes, so the HF path and the phase 2 zip path cannot
+# drift apart.
 def decode_audio_cell(cell) -> np.ndarray:
     """An undecoded datasets audio cell -> 16 kHz mono float32."""
     import io

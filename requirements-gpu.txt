@@ -6,7 +6,8 @@
 # `pip install torch` from this file — you'll get whatever wheel PyPI defaults to.
 
 transformers>=4.44          # Wav2Vec2BertForCTC + SeamlessM4TFeatureExtractor land in 4.40
-datasets>=2.20              # streaming + interleave_datasets
+# PINNED BELOW 4.0 DELIBERATELY — do not relax this without reading the note at the bottom.
+datasets>=3.6,<4.0          # streaming + interleave_datasets; 3.x decodes Audio with soundfile
 accelerate>=0.33            # Trainer needs it for device placement
 evaluate>=0.4
 jiwer>=3.0                  # WER/CER, same library the organisers' starter notebook scores with
@@ -16,5 +17,27 @@ pandas>=2.0
 numpy>=1.24,<2.1            # numpy 2.1+ still trips some audio wheels
 sentencepiece>=0.2
 pyctcdecode>=0.5            # beam search + shallow fusion
-torchcodec                 # datasets>=4 decodes Audio through this; needs ffmpeg (see scripts/setup_lightning.sh)
 huggingface-hub>=0.24
+
+# ---------------------------------------------------------------------------------------------
+# Why datasets is pinned to 3.x, and why torchcodec is NOT in this file
+#
+# datasets 4.0 moved Audio-column decoding from soundfile to torchcodec. torchcodec ships
+# prebuilt .so files linked against a specific libtorch ABI, and **declares no torch dependency
+# on PyPI at all** — its requires_dist is empty. So `pip install torchcodec` resolves to the
+# newest wheel regardless of the installed torch, and you get:
+#
+#     OSError: libtorchcodec_core6.so: undefined symbol: torch_from_blob
+#
+# on a Lightning Studio running torch 2.8.0+cu128. There is no pin we can write here that is
+# correct on every machine, because the constraint isn't expressible to pip — it depends on
+# whatever torch the host already had. We lost three stage-1 runs to this.
+#
+# datasets 3.6 decodes with soundfile, which we already depend on (line above) and which already
+# reads the phase 2 zip on the exact same code path. One pin, no ABI roulette, and the audio
+# handling is identical to what stage 0 already proved works.
+#
+# If you ever need datasets >= 4: you must also install a torchcodec built against the host's
+# torch, verify it with `python -c "import torchcodec.decoders"`, and add ffmpeg. Don't discover
+# it halfway through a run.
+# ---------------------------------------------------------------------------------------------

@@ -68,6 +68,23 @@ else:
         return WORK                                       # everything in one persistent tree
 print(f"env={ENV}  work={WORK}  zindi={ZINDI_DIR}")
 
+# ---------------------------------------------------------------- datasets version guard
+# datasets 4.0 decodes Audio columns via torchcodec, whose prebuilt .so is linked against a
+# specific libtorch ABI and which declares no torch dependency on PyPI — so pip installs a wheel
+# that may not match the host's torch, and it fails as `undefined symbol: torch_from_blob` from
+# inside the dataset iterator, i.e. after models and audio have already downloaded. Three stage-1
+# runs died that way. Fail here instead, in the first second, with the fix on screen.
+import datasets as _ds
+
+if int(_ds.__version__.split(".")[0]) >= 4:
+    raise SystemExit(
+        f"\n  datasets {_ds.__version__} is installed; this pipeline needs 3.x."
+        "\n  4.0 moved audio decoding to torchcodec (see requirements-gpu.txt)."
+        "\n\n      pip install -q 'datasets>=3.6,<4.0'"
+        "\n\n  Then re-run this script."
+    )
+
+
 OUTDIR = WORK / "w2vbert-waxal"
 # On Kaggle this is last session's output re-uploaded as a Dataset. On Lightning it resolves to
 # WORK, i.e. OUTDIR itself — so a session killed at hour 6 resumes simply by re-running this
@@ -242,10 +259,10 @@ processor.save_pretrained(OUTDIR)
 from datasets import Audio, interleave_datasets, load_dataset
 
 
-# datasets >= 4 decodes Audio columns through torchcodec, which dlopens FFmpeg's shared
-# libraries at import. A bare Lightning studio has neither — scripts/setup_lightning.sh installs
-# both. This helper is the single place audio becomes 16 kHz mono float32, and it takes either a
-# decoded cell or raw bytes, so every caller resamples identically.
+# requirements-gpu.txt pins datasets < 4 so Audio columns decode through soundfile, not
+# torchcodec — see the note at the bottom of that file. This helper is the single place audio
+# becomes 16 kHz mono float32, and it takes either a decoded cell or raw bytes, so every caller
+# resamples identically.
 def decode_audio_cell(cell) -> np.ndarray:
     """An undecoded datasets audio cell -> 16 kHz mono float32."""
     import io

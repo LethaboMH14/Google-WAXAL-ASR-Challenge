@@ -33,10 +33,10 @@ pip install -q -r "$REPO/requirements-gpu.txt"
 # Stage 3 builds KenLM from source into $WORK/kenlm. Doing the apt part here means the GPU
 # machine isn't sitting idle during an apt-get when the meter is running.
 #
-# ffmpeg is NOT optional: datasets >= 4 decodes Audio columns via torchcodec, which dlopens
-# libavutil/libavcodec at import. A Lightning studio ships neither, and the failure surfaces
-# a long way from the cause — as ImportError inside a dataset iterator, after the run has
-# already downloaded models and audio. Install it before the first stage touches HF audio.
+# ffmpeg is here for soundfile/librosa's benefit on compressed inputs. It is no longer load-
+# bearing for HF audio: requirements-gpu.txt pins datasets < 4 precisely so that decoding goes
+# through soundfile rather than torchcodec. Read the note at the bottom of that file before
+# changing either. Keeping ffmpeg costs one apt line and removes a class of codec surprises.
 sudo apt-get -qq update
 sudo apt-get -qq install -y build-essential cmake wget ffmpeg \
     libboost-system-dev libboost-thread-dev libboost-program-options-dev \
