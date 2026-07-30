@@ -49,10 +49,34 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
-ZINDI_DIR = Path("/kaggle/input/waxal-zindi")
-CKPT = Path("/kaggle/input/waxal-ckpt/w2vbert-waxal")     # stage 2 output, uploaded as a Dataset
-LM_CORPUS_DIR = Path("/kaggle/input/waxal-lm/lm_corpus")  # stage 0 output, uploaded as a Dataset
-WORK = Path("/kaggle/working")
+# ---------------------------------------------------------------- 0. where am I running
+# Kaggle and Lightning have opposite storage models, and that is the whole reason for this block.
+#   Kaggle     read-only Datasets at /kaggle/input + an ephemeral /kaggle/working. Every stage's
+#              output must be re-uploaded as a Dataset before the next stage can read it.
+#   Lightning  one persistent home. Stage N writes exactly where stage N+1 looks, so the three
+#              manual dataset uploads — and the chance of attaching a stale checkpoint — vanish.
+# ART(name) hides the difference: it returns wherever the named artefact actually lives.
+if Path("/kaggle/working").exists():
+    ENV, WORK = "kaggle", Path("/kaggle/working")
+    ZINDI_DIR = Path("/kaggle/input/waxal-zindi")         # <- the Dataset you uploaded
+    def ART(name: str) -> Path:
+        return Path("/kaggle/input") / name               # <- the Dataset you attached
+else:
+    ENV = "lightning" if Path("/teamspace/studios/this_studio").exists() else "local"
+    try:
+        REPO = Path(__file__).resolve().parents[1]
+    except NameError:                                     # pasted into a notebook cell
+        REPO = Path.cwd()
+    HOME = Path("/teamspace/studios/this_studio") if ENV == "lightning" else REPO
+    WORK = HOME / "waxal-work"                            # persistent across sessions
+    WORK.mkdir(parents=True, exist_ok=True)
+    ZINDI_DIR = REPO / "data" / "zindi"                   # the csvs are committed to the repo
+    def ART(name: str) -> Path:
+        return WORK                                       # everything in one persistent tree
+print(f"env={ENV}  work={WORK}  zindi={ZINDI_DIR}")
+
+CKPT = ART("waxal-ckpt") / "w2vbert-waxal"                # stage 2 output
+LM_CORPUS_DIR = ART("waxal-lm") / "lm_corpus"             # stage 0 output
 PHASE2_URL = "https://storage.googleapis.com/waxalphase2/audio.zip"
 
 LANGS = ["lin", "sna", "lug"]
@@ -107,14 +131,28 @@ def guess_col(df, *cands):
 
 
 # ---------------------------------------------------------------- 1. build KenLM per language
-os.system(
-    "apt-get -qq install -y build-essential cmake libboost-system-dev libboost-thread-dev "
-    "libboost-program-options-dev libboost-test-dev libboost-filesystem-dev libeigen3-dev zlib1g-dev"
-)
-if not Path("kenlm/build/bin/lmplz").exists():
-    os.system("wget -q -O - https://kheafield.com/code/kenlm.tar.gz | tar xz")
-    os.system("mkdir -p kenlm/build && cd kenlm/build && cmake .. -DCMAKE_BUILD_TYPE=Release "
+# Built into WORK, not the cwd. On Kaggle that's the same thing; on Lightning WORK is persistent,
+# so the cmake+make (several minutes, and on Lightning those minutes are billed against your 15
+# free credits) happens once ever instead of once per session.
+KENLM = WORK / "kenlm"
+LMPLZ = KENLM / "build" / "bin" / "lmplz"
+BUILD_BINARY = KENLM / "build" / "bin" / "build_binary"
+if not LMPLZ.exists():
+    # Kaggle runs as root and has no sudo; Lightning gives you a normal user with sudo. Try
+    # plain apt first and fall back, rather than assuming either.
+    apt = ("apt-get -qq install -y build-essential cmake libboost-system-dev libboost-thread-dev "
+           "libboost-program-options-dev libboost-test-dev libboost-filesystem-dev libeigen3-dev "
+           "zlib1g-dev")
+    if os.system(apt) != 0:
+        os.system(f"sudo {apt}")
+    os.system(f"mkdir -p {KENLM} && wget -q -O - https://kheafield.com/code/kenlm.tar.gz "
+              f"| tar xz -C {KENLM} --strip-components=1")
+    os.system(f"mkdir -p {KENLM}/build && cd {KENLM}/build && cmake .. -DCMAKE_BUILD_TYPE=Release "
               "> /dev/null && make -j4 lmplz build_binary > /dev/null")
+assert LMPLZ.exists(), (
+    f"KenLM did not build at {LMPLZ}. Without it there is no shallow fusion and no ~59% WER "
+    f"win — stop and fix this rather than falling through to greedy decoding."
+)
 os.system("pip -q install pyctcdecode https://github.com/kpu/kenlm/archive/master.zip")
 
 LM_DIR = WORK / "lm"
@@ -160,14 +198,14 @@ for lang in LANGS:
     # singleton high-order n-grams are noise anyway.
     prune = "--prune 0 0 0 1 1" if n_words > 2_000_000 else ""
     subprocess.run(
-        f"kenlm/build/bin/lmplz -o {NGRAM_ORDER} --text {txt} --arpa {arpa} "
+        f"{LMPLZ} -o {NGRAM_ORDER} --text {txt} --arpa {arpa} "
         f"--discount_fallback {prune}",
         shell=True, check=True,
     )
     # Binary format loads in seconds instead of minutes, which matters because the alpha/beta
     # sweep constructs a decoder 12 times per language.
     binary = LM_DIR / f"{lang}.bin"
-    subprocess.run(f"kenlm/build/bin/build_binary {arpa} {binary}", shell=True, check=True)
+    subprocess.run(f"{BUILD_BINARY} {arpa} {binary}", shell=True, check=True)
     arpa.unlink(missing_ok=True)
 
     lm_paths[lang] = str(binary)
@@ -310,8 +348,9 @@ needed = set(needed_ids)
 print(f"submission contract: {len(needed_ids):,} unique ids across {len(TEMPLATES)} template(s)")
 
 audio_store, known_lang = {}, {}
-if Path("/kaggle/input/waxal-ckpt/lang_map.json").exists():
-    known_lang = json.load(open("/kaggle/input/waxal-ckpt/lang_map.json"))
+_lang_map = ART("waxal-ckpt") / "lang_map.json"           # stage 1 wrote it; reuse, don't re-LID
+if _lang_map.exists():
+    known_lang = json.load(open(_lang_map))
 
 # Cheapest and most reliable source first: the id prefix.
 for i in needed_ids:

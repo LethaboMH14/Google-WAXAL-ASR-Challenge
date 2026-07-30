@@ -8,6 +8,10 @@ venv/
 google-waxal-asr-challenge*/
 google-waxal-asr-challenge*.zip
 
+# The persistent working tree the stages read and write (Lightning home, or repo root when
+# running locally). Checkpoints, LM binaries, the KenLM build, the phase 2 audio zip.
+waxal-work/
+
 # Model / LM artefacts. These are big and are rebuilt by the scripts.
 *.tflite
 *.bin

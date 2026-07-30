@@ -126,31 +126,49 @@ Azure is still useful for the **CPU** side — a `Standard_D4s_v3` (4 vCPU / 16 
 available) beats this laptop for KenLM building and the alpha/beta sweep, both of which are
 CPU-only.
 
-**Training runs on Kaggle** (free: 2×T4 16GB, ~30 GPU-hours/week, session-capped, internet on,
-no credit card). Fallback ladder if Kaggle is unavailable:
+**Training runs on Lightning AI** (free plan: 15 credits/month, no credit card, no phone
+verification, **persistent storage**). We moved off Kaggle because its GPU tier requires phone
+verification neither builder could complete — a human blocker, not a technical one.
 
 | Option | GPU | Cost | Notes |
 |---|---|---|---|
-| **Kaggle** | 2×T4 | free | 30 GPU-h/week. Enough for the whole plan. Default. |
-| Lightning AI Studio | T4 | free tier | ~22 GPU-h/month, persistent disk, no CC |
-| Colab free | T4 | free | disconnects hard; only for stage 1 and 3 |
-| Colab Pro | L4/A100 | ~$10/mo | best value if any spend is possible |
-| RunPod / Vast.ai | 4090/A5000 | ~$0.25/h | ~$5 for the full run; needs a card |
+| **Lightning AI** | L4 | free | 15 credits/mo ≈ 21 L4-hours. Persistent disk. **Default.** |
+| Kaggle | 2×T4 | free | 30 GPU-h/week, more than enough — but phone-verification gated |
+| Colab free | 1×T4 | free | 12 h cap, 90-min idle kill, no background exec. Stages 1 and 3 only |
+| SageMaker Studio Lab | T4 | free | **Dead** — new signups closed 30 Jul 2026 |
+| HF Spaces ZeroGPU | H200 | free | 3.5 min/day. Useless for training; fine for hosting artefacts |
 
-Renting compute does not breach the rules — *"no paid services or free trials that require a
-credit card"* sits in the **code-reproducibility** section and constrains what the *solution
-depends on* (paid APIs, AutoML), not where you rent a GPU. Otherwise no one with a personal
-GPU could enter. Post the question on the Zindi discussion board if you want it in writing.
+The scripts run unchanged on all of these — each detects its environment and resolves its own
+paths (`env=lightning` / `env=kaggle` / `env=local` is the first line of every stage's output).
 
-Budget for the ~30 available Kaggle GPU-hours:
+Everything above is free-tier and card-free, which keeps us inside *"no paid services or free
+trials that require a credit card."* Note that the rule sits in the **code-reproducibility**
+section and constrains what the *solution depends on* (paid APIs, AutoML), not where you rent a
+GPU — otherwise nobody with a personal GPU could enter. We stay on free tiers anyway; there is
+no reason to test the boundary for a few hours of compute.
 
-| Stage | Script | GPU-h |
-|---|---|---|
-| LM text corpora | `kaggle/00_build_lm_corpus.py` | **0** (CPU session) |
-| Zero-shot baseline → first valid submission | `kaggle/01_baseline_submission.py` | ~1.5 |
-| Multilingual w2v-bert-2.0 CTC fine-tune | `kaggle/02_train_w2vbert.py` | ~8 (one session; a 2nd is upside) |
-| LM build + beam decode + LID + final submission | `kaggle/03_decode_and_submit.py` | ~2 |
-| Slack for one failed run | — | ~10 |
+**Why L4 and not T4.** On Lightning they cost roughly the same per hour (~$0.70 vs ~$0.68), but
+the L4 is about double the throughput, has 24 GB rather than 16 GB, and supports bf16 natively.
+T4 is Turing, so it has no bf16 and training falls back to fp16 — workable, less stable. Same
+credits, better machine.
+
+Budget against the 15 free credits:
+
+| Stage | Script | Machine | Credits |
+|---|---|---|---|
+| LM text corpora | `kaggle/00_build_lm_corpus.py` | CPU | **~0** |
+| Zero-shot baseline → first valid submission | `kaggle/01_baseline_submission.py` | L4 ~1 h | ~0.7 |
+| Multilingual w2v-bert-2.0 CTC fine-tune | `kaggle/02_train_w2vbert.py` | L4 ~8 h | ~5.6 |
+| LM build + beam decode + LID + final submission | `kaggle/03_decode_and_submit.py` | L4 ~2 h | ~1.4 |
+| **Total** | | **~11 h** | **~7.7** |
+
+That leaves ~7 credits — one failed stage 2, and not much else. Lightning bills wall-clock, not
+utilisation, so an idle Studio is the cheapest way to lose this competition to something that
+isn't a modelling mistake.
+
+**If credits run short, drop stage 2.** It is 70% of the budget and it is the optional part: the
+dominant measured lever is the KenLM shallow fusion in stage 3 (~59% relative WER cut on lug/sna),
+not the fine-tune. Stage 1 + stage 3 against the baseline model is ~3 credits and still scores.
 
 The local machine's job is orchestration, data inspection and submission validation only.
 
@@ -159,20 +177,23 @@ The local machine's job is orchestration, data inspection and submission validat
 ## 5. Order of operations
 
 ```
-0. Download the 5 Zindi files into data/zindi/   (you, manually — they are behind login)
-1. python local/inspect_data.py                  (locally — decides normalisation + format)
-2. kaggle/00_build_lm_corpus.py                  (Kaggle CPU — no GPU quota burned)
-                                                 -> save output as Dataset `waxal-lm`
-3. kaggle/01_baseline_submission.py              (Kaggle GPU — get a score on the board today)
-4. kaggle/02_train_w2vbert.py                    (Kaggle GPU — the actual model)
-                                                 -> save output as Dataset `waxal-ckpt`
-5. kaggle/03_decode_and_submit.py                (Kaggle GPU — LM decode, both phases)
+0. git clone + bash scripts/setup_lightning.sh   (once, on a CPU Studio)
+1. python local/inspect_data.py                  (locally — confirms the data profile)
+2. python kaggle/00_build_lm_corpus.py           (CPU Studio — no credits burned)
+3. python kaggle/01_baseline_submission.py       (L4 — get a score on the board today)
+4. python kaggle/02_train_w2vbert.py             (L4 — the actual model; re-run to resume)
+5. python kaggle/03_decode_and_submit.py         (L4 — LM decode, both phases)
 6. python local/validate_submission.py <csv>     (locally — before every upload)
 ```
 
-Stage 0 runs on a **CPU** session, so it costs none of the 30 weekly GPU-hours, and it can run
-concurrently with stage 1. Do it early: it is the only stage whose failure mode is silent
-(a thin corpus doesn't crash, it just quietly gives back the biggest win in the plan).
+No dataset uploads between stages. Every stage reads and writes
+`/teamspace/studios/this_studio/waxal-work/`, which persists across sessions — that is the
+whole reason stage 2 resumes by simply being run again. The Zindi CSVs are committed to this
+repo, so cloning it is the data setup.
+
+Stage 0 runs on a **CPU** Studio, so it costs essentially no credits. Do it early: it is the
+only stage whose failure mode is silent (a thin corpus doesn't crash, it just quietly gives
+back the biggest win in the plan).
 
 Submission mechanics: Zindi competition page → **Submit** → drag the CSV → optional comment
 → Submit. Limit **5/day, 200 total**. Before close, select the **2** submissions to be judged
@@ -275,8 +296,8 @@ Phase 1 leaderboard**, this is the highest-priority missing input.
 Its ID list, **`Test_phase2.csv`, is not in the bulk-download zip** — the zip's `manifest-*.json`
 names only four files and omits it, so "Download all" doesn't give it to you. It is on the Zindi
 **Data** tab as a separate download. It is now in `data/zindi/`. Stages 1 and 3 glob for it and
-`wget` the audio zip into `/kaggle/working` — pull the 727 MB inside a Kaggle notebook, not over
-a home connection.
+`wget` the 727 MB audio zip into the persistent `waxal-work/` — pull it inside the Studio, not
+over a home connection, and note that the persistence means only one stage ever pays for it.
 
 **e. Phase 2 IDs carry no language, and that changes what LID is for.** Profiled the real file
 on 30 Jul:

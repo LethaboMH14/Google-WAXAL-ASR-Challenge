@@ -53,10 +53,33 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
-IS_KAGGLE = Path("/kaggle/working").exists()
-WORK = Path("/kaggle/working") if IS_KAGGLE else Path(__file__).resolve().parents[1] / "data"
-ZINDI_DIR = Path("/kaggle/input/waxal-zindi") if IS_KAGGLE else WORK / "zindi"
-OUT = WORK / "lm_corpus"
+# ---------------------------------------------------------------- 0. where am I running
+# Kaggle and Lightning have opposite storage models, and that is the whole reason for this block.
+#   Kaggle     read-only Datasets at /kaggle/input + an ephemeral /kaggle/working. Every stage's
+#              output must be re-uploaded as a Dataset before the next stage can read it.
+#   Lightning  one persistent home. Stage N writes exactly where stage N+1 looks, so the three
+#              manual dataset uploads — and the chance of attaching a stale checkpoint — vanish.
+# ART(name) hides the difference: it returns wherever the named artefact actually lives.
+if Path("/kaggle/working").exists():
+    ENV, WORK = "kaggle", Path("/kaggle/working")
+    ZINDI_DIR = Path("/kaggle/input/waxal-zindi")         # <- the Dataset you uploaded
+    def ART(name: str) -> Path:
+        return Path("/kaggle/input") / name               # <- the Dataset you attached
+else:
+    ENV = "lightning" if Path("/teamspace/studios/this_studio").exists() else "local"
+    try:
+        REPO = Path(__file__).resolve().parents[1]
+    except NameError:                                     # pasted into a notebook cell
+        REPO = Path.cwd()
+    HOME = Path("/teamspace/studios/this_studio") if ENV == "lightning" else REPO
+    WORK = HOME / "waxal-work"                            # persistent across sessions
+    WORK.mkdir(parents=True, exist_ok=True)
+    ZINDI_DIR = REPO / "data" / "zindi"                   # the csvs are committed to the repo
+    def ART(name: str) -> Path:
+        return WORK                                       # everything in one persistent tree
+print(f"env={ENV}  work={WORK}  zindi={ZINDI_DIR}")
+
+OUT = WORK / "lm_corpus"                                  # stage 3 reads this back via ART()
 OUT.mkdir(parents=True, exist_ok=True)
 
 LANGS = ["lin", "sna", "lug"]
@@ -133,7 +156,7 @@ def to_sentences(raw: str) -> list[str]:
 # actively harmful: they inflate the vocabulary with unreachable words and steal probability
 # mass. Derive the allowed charset from the same place stage 2 derives its vocab.
 def load_charset() -> set[str]:
-    for cand in (Path("/kaggle/input/waxal-ckpt/w2vbert-waxal/vocab.json"),
+    for cand in (ART("waxal-ckpt") / "w2vbert-waxal" / "vocab.json",
                  WORK / "w2vbert-waxal" / "vocab.json"):
         if cand.exists():
             vocab = json.loads(cand.read_text(encoding="utf-8"))

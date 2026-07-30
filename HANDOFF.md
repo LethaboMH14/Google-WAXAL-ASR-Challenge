@@ -10,22 +10,26 @@
 
 ---
 
-## 0. Why you and not me — and the phone question, precisely
+## 0. We are on Lightning AI, not Kaggle — the phone is no longer the blocker
 
-Kaggle will not give you a GPU until **the account running the notebooks** is verified with a
-phone number. I don't have a usable phone for that right now, you do. That's the whole reason
-this is landing on you.
+Kaggle will not give you a GPU until the account running the notebooks is phone-verified, and
+that verification is blocked on both sides. **So we're not using Kaggle.** We're using
+**Lightning AI**: no credit card, no phone verification, 15 free credits a month, and — the
+part that actually matters — **persistent storage**.
 
-**To be unambiguous: verify *your own* Kaggle account and run the notebooks from it.** It does
-not have to be my account, and there is nothing for me to verify on my side — Kaggle GPU access
-is per-account, and the work is shared through this repo and through Zindi, not through a
-Kaggle login. If you bounce this back to me we both wait and the deadline doesn't move.
+That last bit removes three whole steps from the old plan. On Kaggle every stage's output had
+to be re-uploaded as a Dataset before the next stage could read it. On Lightning, stage N writes
+exactly where stage N+1 looks. No uploads, no chance of attaching last week's checkpoint by
+mistake, and a training run that dies at hour 6 resumes by **re-running the same command**.
 
-One thing that could genuinely block you: **Kaggle binds a phone number to one account.** If
-your number was already used on an older Kaggle account of yours, verification on a new one
-will fail. If that happens, log into the old account and use that instead — any verified
-account works. Tell me straight away if you hit this, because it's the one failure here I
-can't route around from my side.
+The scripts detect where they're running and resolve paths themselves — the same file works on
+Lightning, on Kaggle, and on your laptop. You do not edit paths. If Kaggle ever unblocks, the
+Kaggle runbook still works unchanged.
+
+**Pick an L4, not a T4.** On Lightning they cost about the same per hour (~$0.70 vs ~$0.68) but
+the L4 is roughly double the throughput, has 24 GB instead of 16 GB, and supports bf16 natively.
+The T4 is Turing — no bf16 — so training silently falls back to fp16, which works but is less
+stable. Same money, better machine, fewer hours burnt. See §4 for the credit budget.
 
 Everything else is already done: the data is downloaded and profiled, the plan is decided and
 written up, and all six scripts are written, corrected against the real data, and compiling.
@@ -168,34 +172,71 @@ consequences you need to hold onto while you run this:
 
 1. **Zindi:** create an account, join the challenge, accept the data terms, **and accept my
    team invite** (rule 1 above).
-2. **Kaggle:** create an account → Settings → **Phone Verification**. Without it there is no
-   GPU and none of this works. Then confirm you can see "GPU T4 x2" in a notebook's
-   Accelerator dropdown.
-3. **Upload the data as a Kaggle Dataset.** Kaggle → Datasets → New Dataset → drag in the
-   four files from `data/zindi/`. Name it **exactly** `waxal-zindi` — the scripts hardcode
-   `/kaggle/input/waxal-zindi`. Set it **Private**.
-4. For each stage below: new Kaggle Notebook → paste the script in → Settings: **Accelerator**
-   as stated, **Internet ON**, **Persistence: Variables and Files** → attach the input
-   datasets it needs → **Save Version → Save & Run All (Commit)**.
+2. **Lightning AI:** sign up at `lightning.ai`. Free plan, no credit card. You get 15 credits a
+   month and one Studio you can leave running.
+3. **Create a Studio and clone the repo into it.** The Studio home
+   (`/teamspace/studios/this_studio`) is persistent — everything you install or download
+   survives a session restart.
 
-   Run it as a *committed* version, not interactively. Interactive sessions die when your
-   laptop sleeps; committed runs finish on Kaggle's side.
+   ```bash
+   git clone https://github.com/LethaboMH14/Google-WAXAL-ASR-Challenge.git
+   cd Google-WAXAL-ASR-Challenge
+   bash scripts/setup_lightning.sh
+   ```
+
+   The setup script installs the Python stack and the KenLM build dependencies, then prints
+   your GPU, whether bf16 is available, and the library versions. **Run it on a CPU Studio** —
+   there is no reason to pay GPU rates for a pip install.
+4. **There is no data upload step.** The four Zindi CSVs are committed to this repo, so cloning
+   it *is* the data setup. The scripts find them at `data/zindi/` automatically.
+5. Every stage writes to `/teamspace/studios/this_studio/waxal-work/`. That directory is the
+   handoff between stages and it persists. Don't delete it between runs.
+
+### The credit budget — read this before you start a GPU
+
+You have **15 credits/month ≈ 21 hours on an L4** (~$0.70/hr). The plan needs about 11:
+
+| Stage | Machine | Time | Credits |
+|---|---|---|---|
+| 0 — LM corpus | **CPU** | ~30 min | ~0 |
+| 1 — MMS baseline | L4 | ~1 h | ~0.7 |
+| 2 — fine-tune | L4 | ~8 h | ~5.6 |
+| 3 — KenLM decode | L4 | ~2 h | ~1.4 |
+| **Total** | | **~11 h** | **~7.7** |
+
+That leaves roughly 7 credits of margin — enough for one failed stage 2, and not much more.
+**So: never leave a GPU Studio idle.** Lightning bills wall-clock, not utilisation. Stop the
+machine the moment a stage finishes. This is the single easiest way to lose the competition
+to something that isn't a modelling mistake.
+
+If you are running low, the fallback in §5 (skip stage 2) costs ~3 credits total and still
+gets a real score on the board.
 
 ---
 
 ## 5. The five runs, in order
 
-Budget is ~30 GPU-hours per week on the free tier. The plan needs ~11.5, so there is room for
-one failed run. **Don't waste GPU on stage 0 — it is CPU-only.**
+Run each with plain `python kaggle/<script>.py` from the repo root. Despite the folder name,
+these are not Kaggle-only — they detect the environment and resolve their own paths. Each one
+prints `env=lightning work=... zindi=...` as its first line; **if that first line says
+`env=local` you are not where you think you are.**
+
+**Don't waste credits on stage 0 — it is CPU-only.** Switch the Studio to CPU for it.
+
+> **If you run short on credits:** stage 2 is 70% of the budget and it is the *optional* part.
+> The biggest measured win in this whole plan is the KenLM shallow fusion in stage 3 (~59%
+> relative WER cut on Luganda and Shona), not the fine-tune. Stage 1 + stage 3 pointed at the
+> baseline model is ~3 credits and still puts a real score on the board. Tell me and I'll wire
+> the switch — it's a one-flag change, not a rewrite.
 
 ### Stage 0 — `kaggle/00_build_lm_corpus.py` · **CPU session** · 0 GPU-hours
 
 Builds monolingual text corpora for the language models. Pulls Wikipedia, MasakhaNEWS and
 FLEURS transcripts for each of the three languages, plus the in-domain WAXAL text repeated 10×.
 
-- Attach: `waxal-zindi`. Accelerator: **None**. Internet: **ON**.
-- Output: `/kaggle/working/lm_corpus/{lin,sna,lug}.txt` + `lm_sources.json`.
-- **When it finishes: Save Version output → New Dataset named `waxal-lm`.**
+- Machine: **CPU Studio.** Do not start a GPU for this.
+- Output: `waxal-work/lm_corpus/{lin,sna,lug}.txt` + `lm_sources.json`. Stage 3 reads it from
+  there directly — nothing to upload.
 
 **This is the single highest-value stage and its failure mode is silent.** A thin corpus
 doesn't crash, it just quietly gives back the biggest win in the plan. The script prints each
@@ -204,43 +245,50 @@ that output and send it to me. If Luganda says TOO SMALL, tell me before you go 
 
 `lm_sources.json` is also our rules-required disclosure of external data. Don't delete it.
 
-### Stage 1 — `kaggle/01_baseline_submission.py` · **GPU T4 x2** · ~1.5 h
+### Stage 1 — `kaggle/01_baseline_submission.py` · **L4** · ~1 h · ~0.7 credits
 
 Zero-shot `facebook/mms-1b-all` with its per-language adapters. No training. The point is to
 get a real score on the board today and to prove the whole pipeline works — audio resolution →
 language routing → decode → submission format — **before** we spend 8 GPU-hours training.
 
-- Attach: `waxal-zindi`. Internet: **ON**.
-- Output: `/kaggle/working/submission_01_mms_zeroshot_phase1.csv`, `..._phase2.csv`,
+- Output: `waxal-work/submission_01_mms_zeroshot_phase1.csv`, `..._phase2.csv`,
   and `lang_map.json` (the language decisions — stage 3 reuses them instead of re-running LID).
+- It downloads the 727 MB phase 2 audio zip into `waxal-work/` on first run. That download is
+  persistent, so stage 3 will not repeat it.
 - Expect roughly mid-pack. Zero-shot MMS measured 44.7 / 36.9 / 32.1 WER on this corpus. If it
   scores near zero, the format is wrong — check §6 before resubmitting.
 
 Download the CSV, validate it (§6), submit it. **That's our first score.**
 
-### Stage 2 — `kaggle/02_train_w2vbert.py` · **GPU T4 x2** · ~8 h
+### Stage 2 — `kaggle/02_train_w2vbert.py` · **L4** · ~8 h · ~5.6 credits
 
 The actual model: `facebook/w2v-bert-2.0` (580M) fine-tuned as one shared multilingual CTC
-model over all three languages.
+model over all three languages. **This is 70% of your credit budget — read §4 first.**
 
-- Attach: `waxal-zindi`. Internet: **ON**. Persistence **ON**.
-- Kaggle kills a session at 12 h, so 2,500 steps is sized to fit with margin.
-- **When it finishes: Save Version output → New Dataset named `waxal-ckpt`.**
-- If it dies partway, upload whatever checkpoint exists as `waxal-ckpt` and re-run — the
-  script resumes from `/kaggle/input/waxal-ckpt`.
+- Output: `waxal-work/w2vbert-waxal/`.
+- The script sets `GRAD_ACCUM = 8` on a single GPU (vs 4 on two) so the effective batch size is
+  identical either way. You get the same model, it just takes more wall-clock per step.
+- **If it dies partway, just run the same command again.** It resumes from
+  `waxal-work/w2vbert-waxal/` because that is both where it saves and where it looks. There is
+  no upload step and nothing to remember. This is the main thing Lightning buys us.
+- Start it and **check back**, don't watch it. But do not let the Studio sit idle after it
+  finishes — you are billed for wall-clock, not GPU utilisation.
 
 Watch the first 50 steps. **Loss must be a finite number and must come down.** If it prints
 `inf` or `nan`, stop the run and message me — that means the CTC label-length filter is wrong
 for some batch and burning 8 hours on it is pointless.
 
-### Stage 3 — `kaggle/03_decode_and_submit.py` · **GPU T4 x2** · ~2 h
+### Stage 3 — `kaggle/03_decode_and_submit.py` · **L4** · ~2 h · ~1.4 credits
 
 Builds a 5-gram KenLM per language from the stage-0 corpora, then decodes the fine-tuned model
 with `pyctcdecode` beam search + shallow fusion. **This is where the big win is** — published
 measurements on these exact languages show KenLM fusion cutting WER by ~59% on Luganda and
 Shona versus greedy decoding.
 
-- Attach: `waxal-zindi` **and** `waxal-ckpt` **and** `waxal-lm`. Internet: **ON**.
+- Inputs: the stage 0 and stage 2 outputs, both already in `waxal-work/`. Nothing to attach.
+- It builds KenLM from source into `waxal-work/kenlm` on first run (several minutes of cmake).
+  That build is persistent, so a re-run skips it. If the build fails the script **stops** rather
+  than quietly falling back to greedy decoding and costing us the whole LM win.
 - It sweeps alpha/beta on the validation split and picks the best per language. It compares
   against greedy and **falls back to greedy if the LM loses** — that's deliberate, not a bug.
 - If it warns that the best alpha landed at the edge of the grid, tell me; the grid needs widening.
@@ -344,6 +392,21 @@ And the thing you couldn't get:
     "row count 1,500 != 4,253" error, which is precisely the false alarm that gets a good
     submission binned.
 
+And the thing that unblocks you:
+
+- **We moved off Kaggle to Lightning AI** (§0). Kaggle's phone verification was blocked on both
+  sides, so it stopped being worth solving. Lightning needs no card and no phone, and its
+  persistent storage deletes the three Dataset-upload steps between stages.
+  - All four stages now detect their environment and resolve paths themselves — Lightning,
+    Kaggle, or your laptop, same file. The first line each one prints is `env=... work=...`.
+  - Stage 3 builds KenLM into the persistent `waxal-work/` instead of the cwd, so the cmake
+    build happens once ever rather than once per session, and it now **asserts** the build
+    succeeded instead of silently falling through to greedy decoding.
+  - `scripts/setup_lightning.sh` + `requirements-gpu.txt` are new — Kaggle preinstalls this
+    stack, Lightning doesn't.
+  - The credit budget is real and tight: **~7.7 of your 15 credits** for the full plan. §4 has
+    the table. The one way to blow it is leaving a GPU Studio idle.
+
 Good catches. Keep doing that.
 
 ---
@@ -358,6 +421,9 @@ Good catches. Keep doing that.
 | Public top | 0.725548135 |
 | Closes | 3 Aug 2026 |
 | Limits | 5 submissions/day, 200 total, team of 4 |
-| Kaggle datasets | `waxal-zindi` (you upload), `waxal-lm` (stage 0), `waxal-ckpt` (stage 2) |
+| Compute | Lightning AI free plan — 15 credits/month, no card, no phone |
+| GPU | **L4** (~$0.70/h, bf16, 24 GB). Not T4 — same price, half the speed |
+| Working dir | `/teamspace/studios/this_studio/waxal-work/` — persistent, shared by all stages |
 | Seed | 1337 everywhere — never change it |
-| Total GPU | ~11.5 h of the ~30 h/week free allowance |
+| Total GPU | ~11 h ≈ 7.7 of your 15 credits |
+| Biggest risk | Leaving a GPU Studio idle. Billing is wall-clock, not utilisation |

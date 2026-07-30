@@ -1,0 +1,19 @@
+# GPU stack for the training/decoding stages. Kaggle ships most of this already; Lightning
+# Studios do not, so this file is what makes a fresh Studio match the environment the scripts
+# were written against.
+#
+# Install with scripts/setup_lightning.sh, which pins torch to the CUDA build. Do NOT
+# `pip install torch` from this file — you'll get whatever wheel PyPI defaults to.
+
+transformers>=4.44          # Wav2Vec2BertForCTC + SeamlessM4TFeatureExtractor land in 4.40
+datasets>=2.20              # streaming + interleave_datasets
+accelerate>=0.33            # Trainer needs it for device placement
+evaluate>=0.4
+jiwer>=3.0                  # WER/CER, same library the organisers' starter notebook scores with
+soundfile>=0.12
+librosa>=0.10
+pandas>=2.0
+numpy>=1.24,<2.1            # numpy 2.1+ still trips some audio wheels
+sentencepiece>=0.2
+pyctcdecode>=0.5            # beam search + shallow fusion
+huggingface-hub>=0.24

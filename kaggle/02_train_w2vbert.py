@@ -42,10 +42,37 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
-ZINDI_DIR = Path("/kaggle/input/waxal-zindi")
-RESUME_DIR = Path("/kaggle/input/waxal-ckpt")     # previous session's output, uploaded as a Dataset
-WORK = Path("/kaggle/working")
+# ---------------------------------------------------------------- 0. where am I running
+# Kaggle and Lightning have opposite storage models, and that is the whole reason for this block.
+#   Kaggle     read-only Datasets at /kaggle/input + an ephemeral /kaggle/working. Every stage's
+#              output must be re-uploaded as a Dataset before the next stage can read it.
+#   Lightning  one persistent home. Stage N writes exactly where stage N+1 looks, so the three
+#              manual dataset uploads — and the chance of attaching a stale checkpoint — vanish.
+# ART(name) hides the difference: it returns wherever the named artefact actually lives.
+if Path("/kaggle/working").exists():
+    ENV, WORK = "kaggle", Path("/kaggle/working")
+    ZINDI_DIR = Path("/kaggle/input/waxal-zindi")         # <- the Dataset you uploaded
+    def ART(name: str) -> Path:
+        return Path("/kaggle/input") / name               # <- the Dataset you attached
+else:
+    ENV = "lightning" if Path("/teamspace/studios/this_studio").exists() else "local"
+    try:
+        REPO = Path(__file__).resolve().parents[1]
+    except NameError:                                     # pasted into a notebook cell
+        REPO = Path.cwd()
+    HOME = Path("/teamspace/studios/this_studio") if ENV == "lightning" else REPO
+    WORK = HOME / "waxal-work"                            # persistent across sessions
+    WORK.mkdir(parents=True, exist_ok=True)
+    ZINDI_DIR = REPO / "data" / "zindi"                   # the csvs are committed to the repo
+    def ART(name: str) -> Path:
+        return WORK                                       # everything in one persistent tree
+print(f"env={ENV}  work={WORK}  zindi={ZINDI_DIR}")
+
 OUTDIR = WORK / "w2vbert-waxal"
+# On Kaggle this is last session's output re-uploaded as a Dataset. On Lightning it resolves to
+# WORK, i.e. OUTDIR itself — so a session killed at hour 6 resumes simply by re-running this
+# script, with no upload step and nothing to remember.
+RESUME_DIR = ART("waxal-ckpt")
 
 BASE = "facebook/w2v-bert-2.0"
 HF_CONFIGS = {"lin": "lin_asr", "sna": "sna_asr", "lug": "lug_asr"}
