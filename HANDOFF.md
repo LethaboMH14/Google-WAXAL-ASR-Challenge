@@ -10,10 +10,22 @@
 
 ---
 
-## 0. Why you and not me
+## 0. Why you and not me — and the phone question, precisely
 
-Kaggle will not give you a GPU until the account is **verified with a phone number**. I don't
-have a usable phone for that right now, you do. That's the whole reason this is landing on you.
+Kaggle will not give you a GPU until **the account running the notebooks** is verified with a
+phone number. I don't have a usable phone for that right now, you do. That's the whole reason
+this is landing on you.
+
+**To be unambiguous: verify *your own* Kaggle account and run the notebooks from it.** It does
+not have to be my account, and there is nothing for me to verify on my side — Kaggle GPU access
+is per-account, and the work is shared through this repo and through Zindi, not through a
+Kaggle login. If you bounce this back to me we both wait and the deadline doesn't move.
+
+One thing that could genuinely block you: **Kaggle binds a phone number to one account.** If
+your number was already used on an older Kaggle account of yours, verification on a new one
+will fail. If that happens, log into the old account and use that instead — any verified
+account works. Tell me straight away if you hit this, because it's the one failure here I
+can't route around from my side.
 
 Everything else is already done: the data is downloaded and profiled, the plan is decided and
 written up, and all six scripts are written, corrected against the real data, and compiling.
@@ -270,7 +282,27 @@ second opinion on:
 
 ---
 
-## 9. Quick reference
+## 9. Fixed since your first pass
+
+Both of the things you flagged were real and are in. Pull before you run anything else.
+
+- **`UnicodeEncodeError` on Windows.** Windows consoles default to cp1252 and cannot encode
+  `ŋ`, `ᵑ` or `’` — all of which are in the real charset, so the script died partway through
+  the report it exists to print. All six scripts now call
+  `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` before any output. No-op on
+  Kaggle. **You no longer need `PYTHONIOENCODING=utf-8`** — verified by re-running
+  `inspect_data.py` with the environment forced to cp1252, which now completes clean.
+- **The "do NOT lowercase blindly" warning.** You were right that it was a false alarm, and it
+  was worse than confusing — it predated the starter-notebook finding and was reasoning as if
+  we had to match the reference's casing. The scorer lowercases both sides, so casing is free.
+  That block is now a *consistency check* against the settled policy, quoting the notebook as
+  the source of truth, and it only complains if the data stops matching README §7b.
+
+Good catches. Keep doing that.
+
+---
+
+## 10. Quick reference
 
 | | |
 |---|---|

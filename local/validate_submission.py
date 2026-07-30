@@ -16,6 +16,17 @@ from pathlib import Path
 
 import pandas as pd
 
+# Windows consoles default to cp1252 and raise UnicodeEncodeError on the characters this
+# pipeline works with (ŋ, ᵑ, ’ are all in the real WAXAL charset), killing a run mid-print.
+# Force UTF-8 on our own streams instead of relying on PYTHONIOENCODING being set.
+# No-op on Linux/Kaggle, where stdout is already UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "data" / "zindi" / "SampleSubmission.csv"
 

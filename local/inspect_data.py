@@ -25,6 +25,16 @@ from pathlib import Path
 
 import pandas as pd
 
+# A Windows console defaults to cp1252, which cannot encode the characters this script exists
+# to show you (ŋ, ᵑ, ’ are all in the real charset) — you get UnicodeEncodeError mid-report
+# instead of a report. Force UTF-8 on our own streams rather than making everyone remember
+# to set PYTHONIOENCODING. No-op on Linux/Kaggle, where stdout is already UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 ROOT = Path(__file__).resolve().parents[1]
 ZINDI = ROOT / "data" / "zindi"
 OUT = ROOT / "data" / "derived"
@@ -188,19 +198,35 @@ def main() -> int:
         (OUT / "charset_raw.json").write_text(json.dumps(chars, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"\n  wrote {OUT/'charset_raw.json'} ({len(chars)} raw chars) and {OUT/'data_report.json'}")
 
-    print("\n=== normalisation decision ===")
+    # ---------- normalisation ----------
+    # This block used to *decide* the policy from the reference distribution. It no longer
+    # does, and the old advice ("reference keeps case -> do NOT lowercase blindly") was
+    # actively misleading: it reasoned as if we had to match the reference's casing, when the
+    # organisers' own scorer lowercases BOTH sides before measuring. From section 8 of
+    # data/zindi/Waxal_Challenge_Starter_Code.ipynb:
+    #
+    #     refs_lower  = [r.lower() for r in references]
+    #     preds_lower = [p.lower() for p in predictions]
+    #     return {"wer": jiwer.wer(refs_lower, preds_lower),
+    #             "cer": jiwer.cer(refs_lower, preds_lower)}
+    #
+    # So casing in the reference is irrelevant — lowercasing is free — and punctuation is
+    # NOT stripped, so we must emit it. Settled in README §7b. What follows is now a
+    # consistency check against that decision, not a recommendation.
+    print("\n=== normalisation policy (settled — README §7b) ===")
+    print("  Source of truth: Waxal_Challenge_Starter_Code.ipynb §8 lowercases both sides")
+    print("  and leaves punctuation alone. Policy: LOWERCASE=True, KEEP_PUNCT={. , ' ’ - ; : ! ?}")
     if tr_txt:
         prof = report["train_text_overall"]
-        if prof["uppercase_ratio"] < 0.005:
-            print("  Reference is effectively lowercase -> lowercase the output. Safe.")
-        else:
-            print(f"  Reference KEEPS case (ratio {prof['uppercase_ratio']:.3f}) -> do NOT lowercase blindly;")
-            print("  CTC lowercase output would cost WER on every capitalised word. Consider truecasing,")
-            print("  or keeping case in the CTC vocab if the ratio is high enough to learn.")
+        print(f"\n  reference uppercase ratio : {prof['uppercase_ratio']:.4f}"
+              "   (irrelevant to score — scorer lowercases both sides)")
         if prof["punctuation"]:
-            print(f"  Reference CONTAINS punctuation {list(prof['punctuation'])[:8]} -> stripping it costs CER.")
+            print(f"  reference punctuation     : {list(prof['punctuation'])[:8]}")
+            print("  -> CONSISTENT with keeping punctuation. Stripping it would cost both WER and CER.")
         else:
-            print("  Reference has no punctuation -> strip punctuation from output.")
+            print("  reference punctuation     : none found")
+            print("  -> INCONSISTENT with the current policy. If this fires, the data changed;")
+            print("     re-read README §7b before trusting KEEP_PUNCT.")
     return 0
 
 

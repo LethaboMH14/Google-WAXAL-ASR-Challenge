@@ -29,6 +29,7 @@ import multiprocessing
 import os
 import re
 import subprocess
+import sys
 import unicodedata
 import zipfile
 from pathlib import Path
@@ -36,6 +37,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+
+# Windows consoles default to cp1252 and raise UnicodeEncodeError on the characters this
+# pipeline works with (ŋ, ᵑ, ’ are all in the real WAXAL charset), killing a run mid-print.
+# Force UTF-8 on our own streams instead of relying on PYTHONIOENCODING being set.
+# No-op on Linux/Kaggle, where stdout is already UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 
 ZINDI_DIR = Path("/kaggle/input/waxal-zindi")
 CKPT = Path("/kaggle/input/waxal-ckpt/w2vbert-waxal")     # stage 2 output, uploaded as a Dataset

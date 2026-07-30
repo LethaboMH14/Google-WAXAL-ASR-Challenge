@@ -42,6 +42,17 @@ from collections import Counter
 from pathlib import Path
 
 # ---------------------------------------------------------------- config
+# Windows consoles default to cp1252 and raise UnicodeEncodeError on the characters this
+# pipeline works with (ŋ, ᵑ, ’ are all in the real WAXAL charset), killing a run mid-print.
+# Force UTF-8 on our own streams instead of relying on PYTHONIOENCODING being set.
+# No-op on Linux/Kaggle, where stdout is already UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
 IS_KAGGLE = Path("/kaggle/working").exists()
 WORK = Path("/kaggle/working") if IS_KAGGLE else Path(__file__).resolve().parents[1] / "data"
 ZINDI_DIR = Path("/kaggle/input/waxal-zindi") if IS_KAGGLE else WORK / "zindi"
