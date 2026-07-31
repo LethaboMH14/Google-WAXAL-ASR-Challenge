@@ -95,6 +95,9 @@ LID_MODEL = "facebook/mms-lid-256"
 ASR_MODEL = "facebook/mms-1b-all"
 
 SEED = 1337
+# What to write when CTC returns nothing. Metric-neutral (see the write-out below); this exists
+# purely so no cell in the CSV reads back as NaN.
+BLANK_FILL = "a"
 BATCH_AUDIO_SECONDS = 60          # chunk long clips; MMS is a CTC model, no length limit but VRAM is
 MAX_CLIP_SECONDS = 40
 
@@ -123,8 +126,16 @@ LOWERCASE = True
 KEEP_PUNCT = set(".,'’-;:!?")
 
 
+# Train.csv uses ASCII ' throughout; MMS emits the curly U+2019 and the modifier U+02BC. On a
+# character metric each of those is a guaranteed wrong character in every word carrying one, and
+# 512 phase-1 rows carry one. Folding costs nothing if the scorer already normalises, and saves
+# those characters if it doesn't.
+APOSTROPHES = {"’": "'", "ʼ": "'", "‘": "'", "´": "'", "`": "'"}
+
+
 def normalise(text: str) -> str:
     text = unicodedata.normalize("NFC", str(text)).strip()
+    text = text.translate(str.maketrans(APOSTROPHES))
     if LOWERCASE:
         text = text.lower()
     text = "".join(c if (c.isalpha() or c.isspace() or c in KEEP_PUNCT) else " " for c in text)
@@ -283,6 +294,33 @@ if missing:
 
 
 # ---------------------------------------------------------------- 3. language ID where unknown
+# ---------------------------------------------------------------- open-set routing
+# Constraining LID's argmax to the three challenge languages is right for phase 1, whose ids
+# carry lin_/sna_/lug_ prefixes and never reach LID at all. It is wrong for phase 2. Run the same
+# model unconstrained over 40 sampled phase-2 clips (local/diagnose_lid_unconstrained.py) and it
+# returns luo 42.5%, lug 27.5%, nyn 20%, guz/xog/kin/kam 2.5% each — zero Lingala, zero Shona, at
+# confidences of 0.98-1.00. Phase 1 is ~44% lin / ~41% sna, so drawing zero of both in 40 clips is
+# not sampling noise.
+#
+# A three-class argmax cannot express "this is Dholuo". It can only return the nearest of three,
+# and for Ugandan Bantu that is always Luganda — which is precisely the 1403/1500 lug routing we
+# saw, and why the forced-Luganda transcripts read `hukendera hu luguudo` (hu- where Luganda takes
+# ku-) and `ni ndeeba` (Runyankole). The mask fix was still necessary; it just wasn't this.
+#
+# mms-1b-all ships 2,396 adapters, luo/nyn/xog/kam/kin among them, so a clip can be decoded in the
+# language it is actually in. Anything LID names that has no adapter falls back to the closed set.
+# Set WAXAL_CLOSED_SET=1 to get the old behaviour back for an A/B.
+OPEN_SET = os.environ.get("WAXAL_CLOSED_SET") != "1"
+try:
+    from huggingface_hub import list_repo_files
+
+    HAS_ADAPTER = {f.split(".")[1] for f in list_repo_files(ASR_MODEL) if f.startswith("adapter.")}
+except Exception as e:                       # noqa: BLE001 - offline is survivable, silence isn't
+    print(f"could not list {ASR_MODEL} adapters ({type(e).__name__}: {e}); closed set only")
+    HAS_ADAPTER, OPEN_SET = set(LANGS), False
+print(f"routing: {'open set' if OPEN_SET else 'closed set'}; "
+      f"{len(HAS_ADAPTER):,} adapters available on {ASR_MODEL}")
+
 unknown = [i for i in needed_ids if i in audio_store and i not in known_lang]
 if unknown:
     from transformers import AutoFeatureExtractor, Wav2Vec2ForSequenceClassification
@@ -291,11 +329,15 @@ if unknown:
     fe = AutoFeatureExtractor.from_pretrained(LID_MODEL)
     lid = Wav2Vec2ForSequenceClassification.from_pretrained(LID_MODEL).to(DEVICE).eval().half()
     id2label = lid.config.id2label
-    # Restrict to the three competition languages: an unconstrained argmax over 256 languages
-    # will happily emit `swh` or `nya` for a Bantu clip and route it to the wrong decoder.
     allowed_idx = [i for i, l in id2label.items() if l in LANGS]
     assert allowed_idx, f"none of {LANGS} in LID label space"
-    print(f"  constraining argmax to {[id2label[i] for i in allowed_idx]}")
+    # The argmax runs over whichever label subset we can actually decode. Open set = every LID
+    # language mms-1b-all has an adapter for; closed set = the three challenge languages.
+    route_idx = ([i for i, l in id2label.items() if l in HAS_ADAPTER] if OPEN_SET
+                 else allowed_idx)
+    assert route_idx, "no LID label has a matching MMS adapter"
+    print(f"  argmax over {len(route_idx):,} language(s)"
+          f"{'' if OPEN_SET else f' {[id2label[i] for i in route_idx]}'}")
 
     def lid_predict(ids: list[str], bs: int = 8, label: str = "lid") -> dict[str, str]:
         """Batched LID. Both the calibration below and the real routing call THIS function —
@@ -314,9 +356,9 @@ if unknown:
                 # what produced the 94%-Luganda phase 2 routing on the first run.
                 logits = lid(inp.input_values.to(DEVICE).half(),
                              attention_mask=inp.attention_mask.to(DEVICE)).logits.float()
-                picks = logits[:, allowed_idx].argmax(-1).cpu().numpy()
+                picks = logits[:, route_idx].argmax(-1).cpu().numpy()
                 for i, p in zip(chunk, picks):
-                    out[i] = id2label[allowed_idx[int(p)]]
+                    out[i] = id2label[route_idx[int(p)]]
                 if k % 400 == 0:
                     print(f"  {label} {k}/{len(ids)}", flush=True)
         return out
@@ -339,7 +381,12 @@ if unknown:
         truth = [known_lang[i] for i in calib]
         pred = [got[i] for i in calib]
         acc = sum(t == p for t, p in zip(truth, pred)) / len(calib)
-        print(f"  LID accuracy: {acc:.1%}")
+        # In open-set mode this is a much harder test than the 97.3% we measured against three
+        # classes: a known-Luganda clip now has to come back as `lug` out of every language
+        # mms-1b-all can decode, not merely beat lin and sna. That is the right test, because it
+        # is the one phase 2 actually sits. A large drop here means open-set routing is scattering
+        # clips across near neighbours and needs a confidence floor before we ship it.
+        print(f"  LID accuracy ({'open' if OPEN_SET else 'closed'} set): {acc:.1%}")
         print("  confusion (rows = true, cols = predicted):")
         print(pd.crosstab(pd.Series(truth, name="true"),
                           pd.Series(pred, name="pred")).to_string())
@@ -365,13 +412,27 @@ processor = AutoProcessor.from_pretrained(ASR_MODEL)
 model = Wav2Vec2ForCTC.from_pretrained(ASR_MODEL, torch_dtype=torch.float16).to(DEVICE).eval()
 
 preds: dict[str, str] = {}
-for lang in LANGS:
+# Decode whatever languages routing actually assigned, not a hardcoded three. Each adapter swap
+# costs a load, so process a language's clips together; sorted() keeps the order deterministic.
+route_langs = sorted(set(known_lang.values()))
+missing_adapter = [l for l in route_langs if MMS_ADAPTER.get(l, l) not in HAS_ADAPTER]
+if missing_adapter:
+    # Nothing sensible to decode these with, so hand them to Luganda: every language LID confused
+    # them with is Bantu, and Luganda is the one of our three with an actual adapter nearby. They
+    # will score badly. Naming them here beats discovering it in the leaderboard.
+    n = sum(1 for i in known_lang if known_lang[i] in missing_adapter)
+    print(f"\nno mms-1b-all adapter for {missing_adapter} ({n} clips) -> falling back to lug")
+    known_lang = {i: ("lug" if l in missing_adapter else l) for i, l in known_lang.items()}
+    route_langs = sorted(set(known_lang.values()))
+
+for lang in route_langs:
     ids = [i for i in needed_ids if known_lang.get(i) == lang and i in audio_store]
     if not ids:
         continue
-    print(f"\n--- {lang}: {len(ids):,} clips ---")
-    processor.tokenizer.set_target_lang(MMS_ADAPTER[lang])
-    model.load_adapter(MMS_ADAPTER[lang])
+    adapter = MMS_ADAPTER.get(lang, lang)
+    print(f"\n--- {lang}: {len(ids):,} clips (adapter {adapter}) ---")
+    processor.tokenizer.set_target_lang(adapter)
+    model.load_adapter(adapter)
     model.to(DEVICE).eval()
 
     # Sort by length so padded batches stay tight — roughly 2x throughput on skewed lengths.
@@ -400,18 +461,24 @@ for lang in LANGS:
 SUFFIX = {"SampleSubmission.csv": "phase1", "Test_phase2.csv": "phase2"}
 for fname, df, tid, ttxt in TEMPLATES:
     sub = df.copy()
-    sub[ttxt] = sub[tid].astype(str).map(preds).fillna("")
+    # An empty Target is neutral for the metric — an empty hypothesis against a 26-word reference
+    # is 26 deletions, and a one-word hypothesis is 25 deletions plus a substitution, same total.
+    # It is NOT neutral for the parser: pandas reads an empty field back as float NaN, and a NaN
+    # handed to jiwer is a type error rather than a bad score. So write a real token instead. We
+    # only get 5 submissions a day; none of them should die on a dtype.
+    mapped = sub[tid].astype(str).map(preds).fillna("")
+    empty = int((mapped.str.strip() == "").sum())      # count BEFORE filling, or we lose the signal
+    sub[ttxt] = mapped.replace(r"^\s*$", BLANK_FILL, regex=True)
     out = WORK / f"submission_01_mms_zeroshot_{SUFFIX.get(fname, Path(fname).stem)}.csv"
     sub.to_csv(out, index=False)
 
-    blank = int((sub[ttxt].str.strip() == "").sum())
     langs = pd.Series([known_lang.get(i, "??") for i in sub[tid].astype(str)]).value_counts()
     print(f"\nwrote {out}")
-    print(f"  rows={len(sub):,}  blank={blank:,} ({100*blank/len(sub):.1f}%)")
+    print(f"  rows={len(sub):,}  empty-before-fill={empty:,} ({100*empty/len(sub):.1f}%)")
     print(f"  language mix: {langs.to_dict()}")
-    if blank:
+    if empty:
         # On phase 2 this almost always means the audio zip did not contain that id.
-        print(f"  WARNING: {blank:,} ids got no prediction and will score as pure deletions.")
+        print(f"  WARNING: {empty:,} ids got no prediction; written as {BLANK_FILL!r}, which scores the same as a deletion but parses.")
     print(sub.head(5).to_string())
 
 # Keep the language decisions — stage 3 reuses them instead of re-running LID.
