@@ -27,6 +27,7 @@ import os
 import random
 import re
 import sys
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -547,6 +548,44 @@ args = TrainingArguments(
     # Omitting them keeps this file working on 4.44+ as well: the 4.x defaults are identical.
 )
 
+
+# ---------------------------------------------------------------- wall-clock stop
+# The binding constraint on a hosted GPU is TIME, not steps — Kaggle kills a GPU session at 9 h
+# and a run killed mid-step does not reliably save anything. Sizing MAX_STEPS from an estimated
+# step rate is how you find that out at hour nine: the first Kaggle attempt was set to 1,500
+# steps on an assumed ~15 s/step, measured 32.7 s/step, and was quietly on course for 13.6 h.
+#
+# So stop on the clock instead of on a guess. The callback ends training at the budget, saves,
+# and lets the normal save_model path run; the next leg resumes from that checkpoint with
+# optimizer state and LR schedule intact. MAX_STEPS then only has to be the right END of the
+# schedule rather than a number that also has to fit in a session.
+#
+# Unset means no limit, which is the local and Lightning behaviour.
+MAX_HOURS = float(os.environ.get("WAXAL_MAX_HOURS", "0"))
+
+from transformers import TrainerCallback  # noqa: E402
+
+
+class StopAfterHours(TrainerCallback):
+    def __init__(self, hours: float):
+        self.deadline = time.monotonic() + hours * 3600
+        self.hours = hours
+
+    def on_step_end(self, args, state, control, **kw):
+        if time.monotonic() >= self.deadline:
+            print(f"\nwall-clock budget of {self.hours} h reached at step {state.global_step} — "
+                  f"stopping and saving. Resume with the same command; it continues from here.",
+                  flush=True)
+            control.should_training_stop = True
+            control.should_save = True
+            control.should_evaluate = True
+        return control
+
+
+callbacks = [StopAfterHours(MAX_HOURS)] if MAX_HOURS > 0 else []
+if MAX_HOURS > 0:
+    print(f"wall-clock budget: {MAX_HOURS} h (training stops and saves at that point)")
+
 trainer = Trainer(
     model=model,
     args=args,
@@ -554,6 +593,7 @@ trainer = Trainer(
     eval_dataset=eval_ds,
     data_collator=Collator(processor=processor),
     compute_metrics=compute_metrics,
+    callbacks=callbacks,
 )
 
 trainer.train(resume_from_checkpoint=RESUME_CKPT)

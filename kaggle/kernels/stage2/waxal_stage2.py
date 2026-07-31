@@ -110,14 +110,39 @@ else:
     print("no previous kernel output mounted; this is leg 1")
 
 # ------------------------------------------------------------------ 4. run
-# 1,500 steps, not 2,500. A Kaggle GPU session is capped at 9 h and a committed run that hits the
-# wall does not reliably save its outputs — so the first leg is sized to FINISH, at ~15 s/step on
-# 2xT4 under DataParallel (~6.3 h) plus ~30 min of model/audio download. Leg 2 resumes from the
-# checkpoint and takes it to 2,500. Losing a finished 1,500-step model to a timeout at step 2,400
-# is the failure this number is chosen to avoid.
 env = dict(os.environ)
-env.setdefault("WAXAL_MAX_STEPS", "1500")
 env.setdefault("PYTHONUNBUFFERED", "1")
+
+# ONE GPU, deliberately, even though Kaggle hands us two. Launched with plain `python`, HF Trainer
+# wraps the model in DataParallel, which re-replicates all 581M parameters onto the second card on
+# every accumulation pass. Measured on version 2 of this kernel: 32.7 s/step on 2xT4 against a
+# 24.4 s/step measurement on ONE T4 doing the same 32 samples. The second GPU was costing us 34%.
+#
+# The fix that would actually use both cards is DDP via torchrun, which replicates once and
+# all-reduces gradients instead. Not done here because the training set is a streaming
+# IterableDataset: under DDP each rank must get a DIFFERENT shard, and transformers 5.9's Trainer
+# has no split_dataset_by_node call — the sharding would be happening inside accelerate's
+# dispatcher, unverified, where getting it wrong silently trains on every sample twice and halves
+# the effective batch without erroring. That is a bad thing to discover from a leaderboard score
+# two days before close. Single-GPU is 34% faster than what we measured and has no such question.
+env["CUDA_VISIBLE_DEVICES"] = "0"
+
+# Stop on the clock, not on a step count (see the StopAfterHours note in the training script).
+# 7.5 h against Kaggle's 9 h cap leaves room for setup, the closing eval, and the final save.
+env.setdefault("WAXAL_MAX_HOURS", "7.5")
+
+# MAX_STEPS is now only the END of the LR schedule, not a promise about this session. Keeping it
+# at the 2,500 the recipe calls for means leg 2 resumes into the SAME schedule rather than a
+# rebuilt one — if leg 1 declared 1,200 and leg 2 declared 2,400, the learning rate would jump
+# back up at the seam. Two 7.5 h legs at ~24 s/step reach roughly 2,200 steps, inside the
+# 2,000-3,500 band WAXAL-NET converged in.
+env.setdefault("WAXAL_MAX_STEPS", "2500")
+
+# Checkpoint every 250 steps (~100 min), not the 100 the script derives. Each checkpoint is ~7 GB;
+# at 24 s/step, every 100 steps means writing 7 GB every 40 minutes, and that I/O comes straight
+# out of the training budget. The session is committed and not expected to be interrupted, so the
+# thing being insured against here is only a crash.
+env.setdefault("WAXAL_EVAL_EVERY", "250")
 
 sh([sys.executable, str(REPO / "kaggle" / "02_train_w2vbert.py")], env=env)
 
