@@ -51,13 +51,28 @@ import torch  # noqa: E402  — imported after pip so we see the version we will
 
 print(f"\ntorch {torch.__version__}  cuda={torch.cuda.is_available()}  "
       f"n_gpu={torch.cuda.device_count()}")
-if torch.cuda.is_available():
-    for i in range(torch.cuda.device_count()):
-        p = torch.cuda.get_device_properties(i)
-        print(f"  gpu{i}: {p.name}  {p.total_memory / 1e9:.0f} GB")
-else:
+if not torch.cuda.is_available():
     # Do not burn a committed run producing nothing. A CPU stage 2 is ~200x too slow to finish.
     raise SystemExit("no CUDA — set the kernel accelerator to GPU T4 x2 before running")
+
+for i in range(torch.cuda.device_count()):
+    p = torch.cuda.get_device_properties(i)
+    print(f"  gpu{i}: {p.name}  {p.total_memory / 1e9:.0f} GB  sm_{p.major}{p.minor}")
+
+# `torch.cuda.is_available()` is NOT enough, and version 1 of this kernel is the proof: it got a
+# P100 (sm_60), reported cuda=True, downloaded the model, entered the training loop and only then
+# died with `CUDA error: no kernel image is available for execution on the device` — six minutes
+# of a committed run for an answer available in the first second. The Kaggle image ships torch
+# 2.10+cu128, whose wheels no longer carry Pascal kernels, so a P100 cannot run this at all
+# regardless of our code. Check the arch list instead of the flag.
+_cc = torch.cuda.get_device_capability(0)
+_sm = f"sm_{_cc[0]}{_cc[1]}"
+if _sm not in torch.cuda.get_arch_list():
+    raise SystemExit(
+        f"this card is {torch.cuda.get_device_name(0)} ({_sm}) and the installed "
+        f"torch {torch.__version__} was built for {torch.cuda.get_arch_list()} — it has no "
+        f"kernels for this device.\nSet machine_shape to 'NvidiaTeslaT4' (T4 is sm_75). Note "
+        f"the capital N: 'nvidiaTeslaT4' is accepted silently and gives you a P100.")
 
 # ------------------------------------------------------------------ 3. secrets (optional)
 # An HF token only lifts anonymous rate limits; the datasets are public and the run works without
