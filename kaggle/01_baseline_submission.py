@@ -52,7 +52,17 @@ for _stream in (sys.stdout, sys.stderr):
 # ART(name) hides the difference: it returns wherever the named artefact actually lives.
 if Path("/kaggle/working").exists():
     ENV, WORK = "kaggle", Path("/kaggle/working")
-    ZINDI_DIR = Path("/kaggle/input/waxal-zindi")         # <- the Dataset you uploaded
+    # The Zindi CSVs are 8 MB and committed to the repo, so a kernel that clones the repo already
+    # has them — maintaining a `waxal-zindi` Dataset alongside is a second copy to keep in sync
+    # and a way to silently work off a stale Train.csv. Prefer an attached Dataset if one is
+    # there (that is how the earlier runs were wired), else fall back to the clone.
+    _ds = Path("/kaggle/input/waxal-zindi")
+    try:
+        _repo_zindi = Path(__file__).resolve().parents[1] / "data" / "zindi"
+    except NameError:                                     # pasted into a notebook cell
+        _repo_zindi = Path.cwd() / "data" / "zindi"
+    ZINDI_DIR = Path(os.environ["WAXAL_ZINDI_DIR"]) if os.environ.get("WAXAL_ZINDI_DIR") else (
+        _ds if _ds.exists() else _repo_zindi)
     def ART(name: str) -> Path:
         return Path("/kaggle/input") / name               # <- the Dataset you attached
 else:
