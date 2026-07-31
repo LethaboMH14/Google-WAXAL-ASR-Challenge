@@ -128,10 +128,33 @@ SAMPLES_PER_FRAME = 640 if ADD_ADAPTER else 320
 # WAXAL-NET converged at 2000-3500 steps, so ONE session already lands near convergence and
 # a second is upside rather than a prerequisite. Raise this if you get a second session.
 MAX_STEPS = 2500
-BATCH = 4
-# Effective batch must land near 32 (the WAXAL-NET recipe). Trainer multiplies by device
-# count, so on Kaggle's 2xT4 this is 4 * 2 * 4 = 32. On a single GPU set GRAD_ACCUM = 8.
-GRAD_ACCUM = 4 if torch.cuda.device_count() > 1 else 8
+
+# --- batch size follows the card, effective batch does not ---------------------------------
+# BATCH=4 + GRAD_ACCUM=8 exists because a 16 GB T4 cannot hold more of a 581M model on 20 s
+# audio. On an 80 GB card that leaves most of the GPU idle and costs 24.4 s/step, which is how
+# a 2,500-step run becomes 17 hours. Scale the micro-batch with the memory actually present and
+# divide the accumulation by the same factor, so the EFFECTIVE batch stays 32 — the WAXAL-NET
+# recipe — and the training maths is unchanged. This is a throughput decision, not a recipe one.
+#
+# Gradient checkpointing is the other T4 concession: it recomputes activations in the backward
+# pass to save memory, at roughly 30-40% of the step time. With headroom it is pure loss.
+#
+# Override with WAXAL_BATCH / WAXAL_ACCUM if a card OOMs; keep their product at 32 per GPU.
+_VRAM_GB = (torch.cuda.get_device_properties(0).total_memory / 1e9
+            if torch.cuda.is_available() else 0)
+if _VRAM_GB >= 60:            # H100 / A100 80GB
+    BATCH, _ACCUM_BASE, GRAD_CKPT = 8, 4, False
+elif _VRAM_GB >= 38:          # A100 40GB / L40S
+    BATCH, _ACCUM_BASE, GRAD_CKPT = 8, 4, True
+elif _VRAM_GB >= 22:          # L4 / A10G 24GB
+    BATCH, _ACCUM_BASE, GRAD_CKPT = 4, 8, True
+else:                         # T4 16GB and below — the original settings
+    BATCH, _ACCUM_BASE, GRAD_CKPT = 4, 8, True
+BATCH = int(os.environ.get("WAXAL_BATCH", BATCH))
+# Effective batch must land near 32 (the WAXAL-NET recipe). Trainer multiplies by device count,
+# so halve the accumulation on multi-GPU. _ACCUM_BASE already tracks BATCH above.
+GRAD_ACCUM = int(os.environ.get(
+    "WAXAL_ACCUM", max(1, _ACCUM_BASE // (2 if torch.cuda.device_count() > 1 else 1))))
 LR = 5e-5                   # 1e-4 is the paper's value for MMS-300M; w2v-bert prefers lower
 WARMUP = 200
 EVAL_EVERY = 500
@@ -175,6 +198,10 @@ else:
 
 BF16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
 print(f"cuda={torch.cuda.is_available()} bf16={BF16} n_gpu={torch.cuda.device_count()}")
+print(f"gpu={torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'} "
+      f"vram={_VRAM_GB:.0f}GB -> batch={BATCH} accum={GRAD_ACCUM} "
+      f"(effective {BATCH * GRAD_ACCUM * max(1, torch.cuda.device_count())}) "
+      f"grad_ckpt={GRAD_CKPT}")
 
 
 # ---------------------------------------------------------------- text normalisation
@@ -440,7 +467,8 @@ model = Wav2Vec2BertForCTC.from_pretrained(
     vocab_size=len(tokenizer),
     ignore_mismatched_sizes=(init_from == BASE),
 )
-model.gradient_checkpointing_enable()
+if GRAD_CKPT:
+    model.gradient_checkpointing_enable()
 print(f"params: {sum(p.numel() for p in model.parameters())/1e6:.0f}M")
 
 from transformers import Trainer, TrainingArguments
@@ -451,7 +479,7 @@ args = TrainingArguments(
     per_device_train_batch_size=BATCH,
     per_device_eval_batch_size=BATCH,
     gradient_accumulation_steps=GRAD_ACCUM,
-    gradient_checkpointing=True,
+    gradient_checkpointing=GRAD_CKPT,
     learning_rate=LR,
     warmup_steps=WARMUP,
     lr_scheduler_type="linear",
