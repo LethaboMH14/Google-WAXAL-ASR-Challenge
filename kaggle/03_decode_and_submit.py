@@ -472,7 +472,15 @@ if unknown:
             chunk = unknown[k:k + 8]
             inp = fe([audio_store[i][:16000 * 30] for i in chunk],
                      sampling_rate=16000, return_tensors="pt", padding=True)
-            sub_logits = lid(inp.input_values.to(DEVICE).half()).logits.float()[:, allowed]
+            # attention_mask is NOT optional. mms-lid-256 has feat_extract_norm="layer" and
+            # return_attention_mask=True, and the sequence-classification head mean-pools over
+            # time — without the mask, zero padding in a variable-length batch is pooled in as
+            # signal and the argmax collapses onto one class. Stage 1 shipped a 94%-Luganda
+            # phase 2 routing because of this exact omission. Stage 1 also calibrates LID
+            # against the phase-1 prefixes; read that number before trusting this block.
+            sub_logits = lid(inp.input_values.to(DEVICE).half(),
+                             attention_mask=inp.attention_mask.to(DEVICE)
+                             ).logits.float()[:, allowed]
             for i, p in zip(chunk, sub_logits.argmax(-1).cpu().numpy()):
                 known_lang[i] = lid.config.id2label[allowed[int(p)]]
     del lid; gc.collect(); torch.cuda.empty_cache()

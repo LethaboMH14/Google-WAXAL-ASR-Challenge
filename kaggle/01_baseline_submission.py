@@ -297,18 +297,59 @@ if unknown:
     assert allowed_idx, f"none of {LANGS} in LID label space"
     print(f"  constraining argmax to {[id2label[i] for i in allowed_idx]}")
 
-    with torch.inference_mode():
-        for k in range(0, len(unknown), 8):
-            chunk = unknown[k:k + 8]
-            wavs = [audio_store[i][:16000 * 30] for i in chunk]
-            inp = fe(wavs, sampling_rate=16000, return_tensors="pt", padding=True)
-            logits = lid(inp.input_values.to(DEVICE).half()).logits.float()
-            sub = logits[:, allowed_idx]
-            picks = sub.argmax(-1).cpu().numpy()
-            for i, p in zip(chunk, picks):
-                known_lang[i] = id2label[allowed_idx[int(p)]]
-            if k % 400 == 0:
-                print(f"  lid {k}/{len(unknown)}")
+    def lid_predict(ids: list[str], bs: int = 8, label: str = "lid") -> dict[str, str]:
+        """Batched LID. Both the calibration below and the real routing call THIS function —
+        if they diverged, the calibration would be measuring something we don't ship."""
+        out: dict[str, str] = {}
+        with torch.inference_mode():
+            for k in range(0, len(ids), bs):
+                chunk = ids[k:k + bs]
+                wavs = [audio_store[i][:16000 * 30] for i in chunk]
+                inp = fe(wavs, sampling_rate=16000, return_tensors="pt", padding=True)
+                # attention_mask is NOT optional here. mms-lid-256 has feat_extract_norm="layer"
+                # and return_attention_mask=True, and Wav2Vec2ForSequenceClassification mean-pools
+                # over time — so without the mask every zero-padded frame in a variable-length
+                # batch is averaged in as if it were audio. That drags each clip's pooled vector
+                # toward the same direction and collapses the argmax onto one class. It is exactly
+                # what produced the 94%-Luganda phase 2 routing on the first run.
+                logits = lid(inp.input_values.to(DEVICE).half(),
+                             attention_mask=inp.attention_mask.to(DEVICE)).logits.float()
+                picks = logits[:, allowed_idx].argmax(-1).cpu().numpy()
+                for i, p in zip(chunk, picks):
+                    out[i] = id2label[allowed_idx[int(p)]]
+                if k % 400 == 0:
+                    print(f"  {label} {k}/{len(ids)}", flush=True)
+        return out
+
+    # --- calibration: measure LID against ids whose language we already know ------------------
+    # Phase 1 ids carry the language in the prefix, so we have thousands of free labels for the
+    # model that decides all 1,500 phase 2 clips on its own. A wrong call there doesn't cost one
+    # word — it sends the whole utterance to the wrong adapter and the wrong KenLM in stage 3.
+    # This is cheap, and it is the difference between knowing and hoping.
+    import random as _random
+
+    _rng = _random.Random(SEED)
+    calib: list[str] = []
+    for _lang in LANGS:
+        pool = [i for i in needed_ids if known_lang.get(i) == _lang and i in audio_store]
+        calib += _rng.sample(pool, min(100, len(pool)))
+    if calib:
+        print(f"\ncalibrating LID on {len(calib)} phase-1 clips with known language")
+        got = lid_predict(calib, label="calib")
+        truth = [known_lang[i] for i in calib]
+        pred = [got[i] for i in calib]
+        acc = sum(t == p for t, p in zip(truth, pred)) / len(calib)
+        print(f"  LID accuracy: {acc:.1%}")
+        print("  confusion (rows = true, cols = predicted):")
+        print(pd.crosstab(pd.Series(truth, name="true"),
+                          pd.Series(pred, name="pred")).to_string())
+        if acc < 0.85:
+            print("  !! LID is the weakest link in the phase 2 path. Every point of LID error is\n"
+                  "     a whole utterance decoded in the wrong language. Do not ship phase 2 on\n"
+                  "     this without looking at the confusion matrix above.")
+
+    print(f"\nrouting {len(unknown):,} phase-2 clips")
+    known_lang.update(lid_predict(unknown))
     del lid
     gc.collect()
     torch.cuda.empty_cache()
