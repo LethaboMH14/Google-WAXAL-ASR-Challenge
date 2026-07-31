@@ -324,10 +324,25 @@ Five uniformly-random uppercase letters. There is no language in the ID and no s
 exploit. So `lang_from_id()` resolves **100% of Phase 1 and 0% of Phase 2**, and on the set that
 actually decides the prize `mms-lid-256` is not a fallback that never fires — **it picks the
 decoder for every single clip.** A LID error is not a few WER points: it decodes the utterance
-against the wrong KenLM and corrupts the whole line. Both stages therefore constrain the LID
-argmax to `{lin, sna, lug}` and print the resulting language mix; compare it against the corpus
-split (~44/41/15 lin/sna/lug) — a wildly different mix means LID is misfiring and the submission
-is not trustworthy.
+against the wrong KenLM and corrupts the whole line.
+
+It turns out to matter more than that. Asked with all 256 classes live, `mms-lid-256` says the
+phase-2 clips are **Dholuo, Runyankole, Luganda, Kinyarwanda, Kamba and Lusoga** — at 0.98–1.00
+confidence, with essentially zero Lingala or Shona. A three-class argmax cannot express "this is
+Dholuo"; it can only return the nearest of three, which for Ugandan Bantu is always Luganda, and
+that is why the constrained router sent 1,403 of 1,500 clips to `lug` while calibrating at 97.3%.
+The forced-Luganda transcripts confirm it independently — Runyankole grammar, and `hu-` verb
+prefixes where Luganda takes `ku-`. See `local/diagnose_lid_unconstrained.py`.
+
+Stage 1 therefore routes **open-set**: the argmax ranges over every LID language that
+`mms-1b-all` ships an adapter for (2,396 of them), so a clip can be decoded in the language it is
+actually in. `WAXAL_CLOSED_SET=1` restores the old behaviour for an A/B. The check to run is not
+"does the mix match ~44/41/15" — for phase 2 it emphatically should not — but
+`local/calibrate_lid_openset.py`, which measures whether the wider label space causes LID to leak
+known-Luganda clips onto their neighbours.
+
+The ~44/41/15 corpus split remains the right sanity check for the **phase 1** file, whose
+languages come from the ID prefix and never touch LID.
 
 The two templates are **disjoint sets with different shapes**, so stages 1 and 3 predict the
 union of both ID lists and write one correctly-shaped file per template

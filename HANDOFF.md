@@ -146,11 +146,25 @@ consequences you need to hold onto while you run this:
 
 - **`mms-lid-256` is now load-bearing.** It resolves 0% of Phase 2 from the ID, so LID picks the
   decoder for all 1,500 clips. A LID error isn't a few WER points — it decodes the clip against
-  the wrong KenLM and corrupts the entire line. Stages 1 and 3 constrain the LID argmax to
-  `{lin, sna, lug}` (an unconstrained argmax over 256 languages will happily emit `swh` for a
-  Bantu clip) and print the resulting language mix. **Check that mix against ~44/41/15
-  lin/sna/lug.** A wildly different split means LID is misfiring and the submission is junk —
-  tell me before you upload it.
+  the wrong KenLM and corrupts the entire line.
+
+  **Phase 2 is not lin/sna/lug, and the mix you should expect is nothing like phase 1's.**
+  Earlier drafts of this file told you to check the phase-2 mix against ~44/41/15 lin/sna/lug and
+  panic if it differed. That guidance was wrong and is withdrawn — it would have you reject a
+  *correct* file. Run unconstrained, `mms-lid-256` calls the phase-2 clips **luo, nyn, lug, kin,
+  kam, xog** at 0.98–1.00 confidence and returns essentially zero Lingala or Shona; the
+  forced-Luganda transcripts the old router produced carry Runyankole grammar and `hu-` verb
+  prefixes where Luganda takes `ku-`. Evidence: `local/diagnose_lid_unconstrained.py`, commit
+  `e9b3885`. Stage 1 therefore routes **open-set**, over every LID language `mms-1b-all` has an
+  adapter for. `WAXAL_CLOSED_SET=1` restores the old three-class behaviour for an A/B.
+
+  So: a phase-2 mix dominated by `luo`/`nyn`/`lug` is the *expected* result. What you should
+  check instead is the run's `LID accuracy (open set): X%` line, or produce it separately with
+  `python local/calibrate_lid_openset.py` — that measures whether opening the label space makes
+  LID leak true-Luganda clips onto their neighbours. ≥90% and the routing is sound.
+
+  **Phase 1 is unaffected either way** — its ids carry `lin_`/`sna_`/`lug_` prefixes and never
+  reach LID at all. Its ~44/41/15 mix *is* still the right check for the phase-1 file.
 - **Two submission shapes, zero overlap.** Phase 1 wants 4,253 rows in SampleSubmission order;
   Phase 2 wants 1,500 rows in Test_phase2 order. Stages 1 and 3 predict the *union* and write
   **one file per template** — `..._phase1.csv` and `..._phase2.csv`. Upload the one matching
@@ -303,9 +317,15 @@ Shona versus greedy decoding.
   against greedy and **falls back to greedy if the LM loses** — that's deliberate, not a bug.
 - If it warns that the best alpha landed at the edge of the grid, tell me; the grid needs widening.
 - Output: `submission_03_w2vbert_lm_phase1.csv` and `..._phase2.csv` — the final submissions.
-  It also prints the language mix per file. **Sanity-check it against ~44/41/15 lin/sna/lug
-  before you upload the phase 2 one** — that mix is the only thing standing between us and
-  1,500 clips decoded against the wrong language model.
+  It also prints the language mix per file. Sanity-check the **phase 1** file against ~44/41/15
+  lin/sna/lug. Do **not** apply that check to the phase 2 file — see the phase-2 note in §3;
+  a luo/nyn/lug-dominated mix there is correct, not a misfire.
+- **Stage 3 does not yet handle the phase-2 languages, and stage 1 does.** The fine-tuned
+  w2v-bert has a CTC vocabulary built from lin/sna/lug transcripts and a KenLM per those three
+  languages; neither can produce Dholuo or Runyankole. Until the stage-3 split lands (fine-tuned
+  model + KenLM for phase 1 and the lug slice of phase 2, MMS adapters for the rest), stage 1's
+  open-set output is the better phase-2 file even though stage 3 is the better phase-1 one. Don't
+  assume the newest file wins on both.
 
 ### Stage 4 — submit
 

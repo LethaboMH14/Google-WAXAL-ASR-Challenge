@@ -54,8 +54,12 @@ if torch.cuda.is_available():
     print(f"bf16       {bf16}")
     if not bf16:
         print("           ^ T4 (Turing) has no bf16. Training falls back to fp16, which is "
-              "fine but less stable. An L4 costs about the same per hour on Lightning and "
-              "has bf16 — prefer it.")
+              "fine but less stable. The bigger reason to move stage 2 off a T4 is VRAM: "
+              "16 GB forces gradient checkpointing and a micro-batch of 4, measured at "
+              "~24 s/step = ~17 h for 2,500 steps, against a free Studio that stops every "
+              "4 h. Cards are NOT the same price — as of Jul 2026 T4 is 0.19 credits/h and "
+              "L4 1.58, on a 15-credit monthly grant. Run stages 0 and 1 on the cheap card; "
+              "move up only for stage 2.")
 import transformers, datasets
 print(f"transformers {transformers.__version__}")
 print(f"datasets     {datasets.__version__}")

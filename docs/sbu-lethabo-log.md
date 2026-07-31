@@ -93,3 +93,65 @@ for the first leaderboard score — not blocked on the phase 2 calibration quest
 
 Not uploading it myself without your go-ahead, since it's the first submission and I'd rather
 you make that call. Say the word and I'll have Sbu submit it, or tell me to hold.
+
+---
+
+## 2026-07-31 — Lethabo: upload phase 1. Calibration script attached. Stale docs fixed.
+
+Good run, and thank you for pulling before flagging the phase-2 distribution — that saved a
+round-trip and you got to the right answer on your own.
+
+**1. Upload phase 1. That's the go-ahead.** Reasons, so you can sanity-check the call rather than
+just take it: phase 1's languages come from the id prefix and never touch LID, so none of the
+open-set uncertainty applies to that file; it costs 1 of 5 daily submissions against 200 total;
+and an unknown baseline is worth more to us right now than a marginally better one three days
+from now. Push it and paste the score here.
+
+**2. Your phase-2 distribution is the strongest evidence we have, and it's yours.** My call in
+`e9b3885` was built on 40 sampled clips. You ran all 1,500 and got luo 718 / nyn 285 / lug 302 /
+kin 107 / kam 41 / xog 17 — same shape, 37x the sample, and the tail (wol, nso, ibo, umb, yao,
+tha, zul) is small enough to look like genuine LID noise rather than a second population. Add
+that to the log as the number we cite from here on; drop my 40-clip one.
+
+**3. The "phase 1 validated OK" vs "FAIL 11 NaN" thing is not a conflict — different files.** I
+should say this plainly because on the surface it looks like one of us is wrong. I validated a
+CSV built *before* `e9b3885`; that commit bundled three changes, not one: open-set routing, the
+`BLANK_FILL` write-out, and apostrophe folding (`git log -S BLANK_FILL` and `-S APOSTROPHES` both
+return only `e9b3885`). Your run was on `e9b3885`, which is exactly why you saw 0 blanks and no
+`['ʼ', '’']` warning where I saw 11 NaN and the apostrophe warning. Your file is the good one.
+
+**4. The calibration number: `python local/calibrate_lid_openset.py` (new, committed).** You were
+right not to burn a GPU-hour re-running stage 1 for one print. The script does LID only over ~100
+phase-1 clips per language — no MMS decoding, no submission — using the *identical* routing rule
+stage 1 uses, and prints open-set accuracy, closed-set accuracy on the same logits, the confusion
+matrix, and the confidence LID had in each wrong answer. CPU is fine, ~10 min, so it won't touch
+stage 2's GPU. ≥90% and phase 2 routing is sound; below that it prints what a confidence floor
+would need to look like. Paste the verdict here.
+
+Note what that number does and doesn't tell us. It measures whether opening the label space makes
+LID leak *known-Luganda* clips onto neighbours — a real risk and the one you're asking about. It
+cannot tell us whether the phase-2 references are actually transcribed in Dholuo, because we have
+no phase-2 labels and never will before the deadline. My position: even if they aren't, those
+clips were producing forced-Luganda garbage before, so open-set can't lose us much and might win
+a lot. Uncertainty stated rather than hidden.
+
+**5. Stale docs — all fixed, and I swept the rest as you suggested.** Good catch, and the
+`~44/41/15` one was the dangerous one: it would have made someone reject a *correct* phase-2 file.
+Fixed in `HANDOFF.md` (both places, with the withdrawal called out explicitly so nobody trusts an
+old copy), `README.md`, and the stage-3 printout. Also fixed: the two `Kaggle -> Output -> New
+Dataset` lines, the `setup_lightning.sh` claim that an L4 "costs about the same" as a T4 (it does
+not — 1.58 vs 0.19 credits/hour on a 15-credit monthly grant, and that line could have quietly
+eaten your month), and the "Run on Kaggle GPU" headers on stages 1/2/3.
+
+**6. One thing you should know before it bites you: stage 3 cannot decode phase 2 yet.** It still
+routes closed-set, and unlike stage 1 it can't simply be switched — what it decodes *with* is a
+w2v-bert fine-tuned on lin/sna/lug transcripts plus one KenLM per those three languages, and
+neither can emit Dholuo. So **do not assume stage 3's phase-2 file beats stage 1's.** Stage 3 wins
+on phase 1; stage 1's open-set output is currently the better phase-2 file. I've put that warning
+in the script and in HANDOFF §3 so it can't be missed at 2am. The fix is a stage-3 split
+(fine-tuned + KenLM for phase 1 and the lug slice of phase 2, MMS adapters for the rest) — I'm
+designing it now, and if you want to take it instead, say so and it's yours.
+
+Open question I don't have an answer to yet, if you want to dig: do HPLT or GlotCC carry enough
+`luo` and `nyn` text to build KenLMs for them? If yes, the non-target clips get shallow fusion
+too and the phase-2 file improves a lot. If no, they get greedy MMS and that's the ceiling.

@@ -1,7 +1,7 @@
 """
 STAGE 3 — the biggest single win: KenLM shallow fusion + beam search, then submit.
 
-Run on Kaggle GPU, Internet ON. ~2 GPU-hours. REQUIRES stage 0 to have run first.
+Where to run: any GPU box with internet, ~2 GPU-hours. REQUIRES stage 0 to have run first.
 
 WAXAL-NET set the published numbers with **CTC greedy decoding**. Beam search against a
 word-level 5-gram is how we get past them. This is not a hopeful 15-25%: arXiv:2512.10968
@@ -15,7 +15,7 @@ measured w2v-bert-2.0 with and without exactly this setup on exactly these three
 model choice. The catch is that those numbers came from 5-9M-word text corpora. A 5-gram built
 on the few thousand Zindi train transcripts is far too sparse and can score WORSE than greedy;
 the same paper shows XLS-R+LM regressing on Lingala and Shona for that reason. So the corpus
-comes from `kaggle/00_build_lm_corpus.py` (mounted as the `waxal-lm` Dataset), with the Zindi
+comes from `kaggle/00_build_lm_corpus.py` (read straight out of persistent storage), with the Zindi
 transcripts as a fallback that is honestly labelled as the weak path.
 
 alpha/beta are TUNED on the validation split, never guessed, and greedy is kept as a baseline
@@ -408,12 +408,21 @@ print(f"language from id prefix: {n_prefix:,} / {len(needed_ids):,}")
 # nothing to exploit. So on the set that actually decides the prize, LID is not a fallback that
 # never fires — it is load-bearing for every single clip, and a LID error means decoding with
 # the wrong KenLM, which corrupts the whole utterance rather than costing a few WER points.
+#
+# KNOWN GAP — this stage still routes CLOSED-SET, and stage 1 no longer does. Unconstrained,
+# mms-lid-256 calls the phase-2 clips luo/nyn/lug/kin/kam/xog (commit e9b3885,
+# local/diagnose_lid_unconstrained.py). This stage cannot simply copy stage 1's open-set fix,
+# because what it decodes with — a w2v-bert fine-tuned on lin/sna/lug transcripts, plus one KenLM
+# per those three languages — has no way to emit Dholuo or Runyankole at all. Fixing it properly
+# means splitting the stage: fine-tuned model + KenLM for phase 1 and the lug slice of phase 2,
+# MMS adapters for the rest. Until that lands, stage 1's phase-2 file is the better one to upload
+# and this stage's phase-2 output should be treated as phase-1-quality only.
 n_lid = len(needed_ids) - n_prefix
 if n_lid:
     print(f"*** {n_lid:,} ids carry no language ({100*n_lid/len(needed_ids):.0f}%) -> "
-          f"{LID_MODEL} decides their decoder. Check the distribution it produces below "
-          f"against the ~44/41/15 lin/sna/lug split of the corpus; a wildly different "
-          f"split means LID is misfiring and the submission is not trustworthy.")
+          f"{LID_MODEL} decides their decoder. This stage is still CLOSED-SET over "
+          f"{{lin, sna, lug}} while stage 1 is open-set, so do NOT check the mix below against "
+          f"~44/41/15 and do NOT assume it beats stage 1 on phase 2 — see the note above.")
 
 # An explicit language column, if a future Test csv ever carries one, overrides the prefix.
 for fname in ("Test.csv", "Test_phase2.csv"):

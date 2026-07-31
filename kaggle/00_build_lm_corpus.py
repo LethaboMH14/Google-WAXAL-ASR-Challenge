@@ -31,7 +31,8 @@ itself. Do not add a source here that you cannot point at a licence for.
 Where to run: any CPU box. Kaggle CPU session (no GPU quota burned), or the Azure
 Standard_D4s_v3. Takes ~20-40 min, mostly download. Output is a few hundred MB of text.
 
-Then: Kaggle -> Output -> New Dataset -> name it `waxal-lm`, so stage 3 can mount it.
+Output lands in persistent `waxal-work/lm/`, which stage 3 reads directly. (Kaggle-era note
+removed: we no longer publish this as a mounted Kaggle Dataset.)
 """
 
 import json
@@ -335,4 +336,4 @@ for lang in LANGS:
 (OUT / "lm_sources.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False),
                                      encoding="utf-8")
 print(f"\nwrote {OUT}/lm_sources.json — this is your rules-required external-data disclosure")
-print(f"\nNow: Kaggle -> Output -> New Dataset -> 'waxal-lm', mounted by stage 3.")
+print(f"\nNow: nothing to publish — {OUT} is persistent and stage 3 reads it from there.")

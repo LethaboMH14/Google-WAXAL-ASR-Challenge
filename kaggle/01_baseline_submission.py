@@ -1,7 +1,8 @@
 """
 STAGE 1 — get a real score on the board today, with zero training.
 
-Run on Kaggle with GPU (T4 x2 or P100), Internet ON. ~1.5 GPU-hours.
+Where to run: any GPU box with internet. We run it on a Lightning Studio T4 (~1.5 GPU-hours);
+Kaggle T4 x2 / P100 also works. The ART() block below makes both resolve their own storage.
 
 Strategy: facebook/mms-1b-all already ships CTC adapters for lin / sna / lug. On this exact
 corpus the WAXAL-NET paper measured it zero-shot at 44.7 / 36.9 / 32.1 WER — worse than a
@@ -10,7 +11,8 @@ pipeline (audio resolution -> language ID -> decode -> submission format) before
 16 GPU-hours training. Never let the first test of your submission plumbing be the run that
 matters.
 
-Upload data/zindi/*.csv as a Kaggle Dataset and point ZINDI_DIR at it.
+The Zindi CSVs come from data/zindi/ in this repo. On Lightning that path is read directly;
+on Kaggle, upload them as a Dataset and point ZINDI_DIR at it.
 
 Rules note: the HF `test` split carries ground-truth `transcription`. We load audio from it
 and DROP that column on sight. Using it would be an explicit disqualification.

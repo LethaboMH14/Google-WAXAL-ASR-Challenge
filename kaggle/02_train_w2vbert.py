@@ -1,7 +1,11 @@
 """
 STAGE 2 — the actual model. One multilingual w2v-bert-2.0 CTC head over lin + sna + lug.
 
-Run on Kaggle GPU, Internet ON. Budget ~8h per session, resumable; plan two sessions.
+Where to run: a GPU box with internet, and the card matters here more than anywhere else.
+BATCH/GRAD_ACCUM below size themselves to the VRAM they find. A 16 GB T4 measures ~24 s/step
+(~17 h for 2,500 steps); an 80 GB card drops gradient checkpointing and runs several times
+faster. The run is resumable either way — see the resume block — so a session that stops does
+not cost you the steps it completed.
 
 Why this shape:
   * ONE model, not three. Phase 2 ships no language metadata, so a per-language model has no
@@ -9,8 +13,9 @@ Why this shape:
     is natural and the languages reinforce each other in the low-resource regime.
   * w2v-bert-2.0 (580M, pretrained on 4.5M hours / 143 languages) beats MMS-300M on Bantu in
     arXiv:2512.10968, and MMS-300M is what WAXAL-NET used to set the published numbers.
-  * Streaming from HF: the three train splits are ~25 GB of audio and Kaggle's disk is not
-    worth the risk. Streaming + step-based training is also the right fit for a time-boxed run.
+  * Streaming from HF: the three train splits are ~25 GB of audio, which is more than we want
+    to land on any of these hosts' disks. Streaming + step-based training is also the right fit
+    for a time-boxed run.
   * SpecAugment is ON. Phase 2 is explicitly a generalisation test to unseen speakers, so we
     trade a little train fit for robustness. Do not turn this off to make the loss curve pretty.
 
@@ -519,4 +524,5 @@ trainer.train(resume_from_checkpoint=RESUME_CKPT)
 trainer.save_model(str(OUTDIR))
 processor.save_pretrained(str(OUTDIR))
 print(f"\nsaved to {OUTDIR}")
-print("Now: Kaggle -> Output -> 'New Dataset' -> name it waxal-ckpt, so session 2 and stage 3 can load it.")
+print(f"Now: nothing to publish — {OUTDIR} is persistent. A second leg resumes from it and "
+      f"stage 3 loads it directly.")
