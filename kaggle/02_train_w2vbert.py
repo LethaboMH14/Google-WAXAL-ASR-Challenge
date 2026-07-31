@@ -128,11 +128,17 @@ MIN_SECONDS = 1.0
 # and buys back the headroom. This is measured, not stylistic.
 ADD_ADAPTER = False
 SAMPLES_PER_FRAME = 640 if ADD_ADAPTER else 320
-# HF Trainer counts OPTIMIZER steps, not forward passes. On 2xT4 with the batch below, one
-# optimizer step is ~10-16s wall clock, so a single ~8h session buys roughly 2000-2800 steps.
-# WAXAL-NET converged at 2000-3500 steps, so ONE session already lands near convergence and
-# a second is upside rather than a prerequisite. Raise this if you get a second session.
-MAX_STEPS = 2500
+# HF Trainer counts OPTIMIZER steps, not forward passes. Measured: 24.4 s/step on a single T4 at
+# BATCH=4/ACCUM=8. On 2xT4 each GPU does 4 accumulation passes instead of 8, so ~13-16 s/step
+# with DDP sync — call it 9.7 h for 2,500 steps.
+#
+# That does not fit a Kaggle GPU session, which is capped at 9 hours, and a committed run that
+# hits the wall does not reliably save its outputs. WAXAL-NET converged at 2000-3500 steps, so
+# 2,000 is inside the converged range rather than a compromise: it gives up the top of a plateau,
+# not the climb. Set WAXAL_MAX_STEPS=2000 on Kaggle T4x2 and it lands in ~7.8 h with headroom.
+#
+# The default stays 2500 because that is the right number anywhere the session isn't capped.
+MAX_STEPS = int(os.environ.get("WAXAL_MAX_STEPS", 2500))
 
 # --- batch size follows the card, effective batch does not ---------------------------------
 # BATCH=4 + GRAD_ACCUM=8 exists because a 16 GB T4 cannot hold more of a 581M model on 20 s
@@ -510,7 +516,11 @@ args = TrainingArguments(
     eval_steps=EVAL_EVERY,
     save_strategy="steps",
     save_steps=EVAL_EVERY,
-    save_total_limit=2,
+    # A checkpoint here is ~7 GB: 2.3 GB of fp32 weights plus AdamW's two fp32 moments. Keeping
+    # two of them alongside the final model is ~16 GB, and /kaggle/working is capped at 20 GB —
+    # close enough that a run could die on disk at hour 8 rather than on anything to do with
+    # training. Lightning's home is 387 GB, so keep the safety margin of a second checkpoint there.
+    save_total_limit=1 if ENV == "kaggle" else 2,
     load_best_model_at_end=True,
     metric_for_best_model="score",
     greater_is_better=True,
