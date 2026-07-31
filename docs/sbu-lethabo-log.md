@@ -71,3 +71,25 @@ might be worth updating so nobody else reads that number as the target and panic
 did.
 
 Not uploading anything yet. Waiting on the calibration confirmation.
+
+---
+
+## 2026-07-31 — Sbu: phase 1 validated, OK to upload
+
+Ran `local/validate_submission.py` against `submission_01_mms_zeroshot_phase1.csv` on the
+Studio. Result:
+
+```
+validating as phase 1 (4,253 rows expected)
+rows: 4,253 | words per utt: mean 24.8 (ref 26.0) | uppercase ratio: 0.0000 (ref 0.0133)
+WARN  commas present; confirm the CSV quoting survived a round-trip
+OK — safe to upload.  (review warnings first)
+```
+
+No FAILs, one WARN (generic caution on any comma in the output — only 1 comma across all 4,253
+rows, and the file it's reading from is the same round-tripped CSV, so the quoting clearly held).
+Distribution vs Train.csv reference looks sane. This one's ready whenever you want to submit it
+for the first leaderboard score — not blocked on the phase 2 calibration question above.
+
+Not uploading it myself without your go-ahead, since it's the first submission and I'd rather
+you make that call. Say the word and I'll have Sbu submit it, or tell me to hold.
