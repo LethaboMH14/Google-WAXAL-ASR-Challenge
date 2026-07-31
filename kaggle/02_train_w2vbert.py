@@ -162,7 +162,22 @@ GRAD_ACCUM = int(os.environ.get(
     "WAXAL_ACCUM", max(1, _ACCUM_BASE // (2 if torch.cuda.device_count() > 1 else 1))))
 LR = 5e-5                   # 1e-4 is the paper's value for MMS-300M; w2v-bert prefers lower
 WARMUP = 200
-EVAL_EVERY = 500
+# How often we eval AND checkpoint. 500 was chosen when a step was a step; it is really a bet on
+# how much work you are willing to lose. That bet has now been settled empirically: a T4 run died
+# at step 96, the first checkpoint was 404 steps away, and every one of those steps was thrown
+# away — `w2vbert-waxal/` held tokenizer files and nothing else.
+#
+# The right number is a wall-clock one, so derive it from the measured step time rather than
+# fixing it: aim to checkpoint about every 20 minutes, clamped to [100, 500] steps. On a T4 at
+# ~24 s/step that is 100 (~40 min, the floor — checkpointing a 581M model plus optimizer state
+# costs real minutes and doing it every 10 would eat the run). On an 80 GB card at ~3 s/step it
+# is 400. Free Studios stop every 4 hours, so the exposure has to stay well under that.
+#
+# Override with WAXAL_EVAL_EVERY if you know better. save_total_limit=2 below caps the disk cost
+# at two checkpoints regardless of how often we write them.
+_SEC_PER_STEP = {8: 3.0, 4: 12.0}.get(BATCH, 24.0) * (1.6 if GRAD_CKPT else 1.0)
+EVAL_EVERY = int(os.environ.get(
+    "WAXAL_EVAL_EVERY", min(500, max(100, round(20 * 60 / _SEC_PER_STEP / 50) * 50))))
 SEED = 1337
 
 random.seed(SEED)
@@ -206,7 +221,8 @@ print(f"cuda={torch.cuda.is_available()} bf16={BF16} n_gpu={torch.cuda.device_co
 print(f"gpu={torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'} "
       f"vram={_VRAM_GB:.0f}GB -> batch={BATCH} accum={GRAD_ACCUM} "
       f"(effective {BATCH * GRAD_ACCUM * max(1, torch.cuda.device_count())}) "
-      f"grad_ckpt={GRAD_CKPT}")
+      f"grad_ckpt={GRAD_CKPT} ckpt_every={EVAL_EVERY} steps "
+      f"(~{EVAL_EVERY * _SEC_PER_STEP / 60:.0f} min of work at risk)")
 
 
 # ---------------------------------------------------------------- text normalisation
