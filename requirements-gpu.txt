@@ -5,6 +5,12 @@
 # Install with scripts/setup_lightning.sh, which pins torch to the CUDA build. Do NOT
 # `pip install torch` from this file — you'll get whatever wheel PyPI defaults to.
 
+# Deliberately NOT capped below 5. Lightning Studios ship transformers 5.14.1, and the scripts
+# run on it — v5 removed TrainingArguments.group_by_length and .save_safetensors, and stage 2 no
+# longer passes either (both were no-ops for us; see the note at that call site). Everything else
+# we use is unchanged across the 4->5 boundary, including ignore_data_skip and get_last_checkpoint.
+# If you add a TrainingArguments kwarg, check it exists on 5.x before you rely on a 16h run:
+#   python -c "import inspect;from transformers import TrainingArguments;print('<kwarg>' in inspect.signature(TrainingArguments.__init__).parameters)"
 transformers>=4.44          # Wav2Vec2BertForCTC + SeamlessM4TFeatureExtractor land in 4.40
 # PINNED BELOW 4.0 DELIBERATELY — do not relax this without reading the note at the bottom.
 datasets>=3.6,<4.0          # streaming + interleave_datasets; 3.x decodes Audio with soundfile

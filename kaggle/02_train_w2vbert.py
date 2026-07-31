@@ -469,10 +469,13 @@ args = TrainingArguments(
     dataloader_num_workers=2,
     report_to=[],
     seed=SEED,
-    group_by_length=False,          # unavailable on a streaming dataset
     remove_unused_columns=False,
     ignore_data_skip=True,          # see the resume block near the top
-    save_safetensors=True,
+    # NOT passed, because transformers 5 removed both and both were no-ops for us anyway:
+    #   group_by_length=False  — already the default, and length grouping cannot work on a
+    #                            streaming IterableDataset regardless
+    #   save_safetensors=True  — v5 saves safetensors unconditionally
+    # Omitting them keeps this file working on 4.44+ as well: the 4.x defaults are identical.
 )
 
 trainer = Trainer(
