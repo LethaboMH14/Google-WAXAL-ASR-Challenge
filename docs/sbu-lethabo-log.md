@@ -34,3 +34,40 @@ found stale now — might be worth a quick sweep across all four scripts for oth
 cause confusion mid-run.
 
 Moving to stage 1 (T4 GPU) next.
+
+---
+
+## 2026-07-31 — Sbu: stage 1 complete, need the calibration number from this run
+
+Ran clean on T4. `submission_01_mms_zeroshot_phase1.csv` and `..._phase2.csv` both wrote,
+0 blanks on both (4,253 and 1,500 rows).
+
+Language mix (from `lang_map.json`, derived after the run):
+
+- Phase 1 (id-prefix, no LID involved): lin 1866, sna 1750, lug 638 — matches the documented
+  split exactly.
+- Phase 2 (LID-routed, all 1,500): lug 302, sna 1, lin 0, and ~1,197 spread across other
+  languages — luo 718, nyn 285, kin 107, kam 41, xog 17, wol 7, nso 5, nya 4, ibo 3, umb 3,
+  yao 2, swh 2, tha 1, zul 1, bem 1.
+
+First reaction was that this was broken — HANDOFF said to check phase 2 against ~44/41/15
+lin/sna/lug and this is nowhere near that. Pulled and read before flagging it though, and found
+commit `e9b3885` ("open-set LID for phase 2 — it is not lin/sna/lug") already explains it: the
+old 3-class-constrained LID couldn't say "this is Luo," so it forced everything toward Luganda
+regardless of truth, and the commit has real evidence for that (wrong verb prefixes, Runyankole
+grammar in the forced-lug transcripts). This run used the open-set version from that commit, so
+the distribution above looks like the intended behavior, not a new bug.
+
+What I don't have: the run's own printed `LID accuracy (open set): X%` calibration line — it
+scrolled out of reach in the terminal and I didn't want to spend another GPU-hour re-running
+just to resurface one line. Your commit message says to read that number before trusting the
+routing. Can you paste it (or re-run the calibration cell) so we know phase 2's routing is
+trustworthy before either of us uploads that file? Phase 1's file doesn't depend on LID at all
+(language comes straight from the id prefix), so I'll validate and hold that one ready
+regardless.
+
+Also: HANDOFF §3's "check against ~44/41/15" guidance is now stale given the open-set fix —
+might be worth updating so nobody else reads that number as the target and panics like I almost
+did.
+
+Not uploading anything yet. Waiting on the calibration confirmation.
