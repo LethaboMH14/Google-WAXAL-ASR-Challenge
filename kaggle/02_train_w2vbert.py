@@ -142,6 +142,37 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 OUTDIR.mkdir(parents=True, exist_ok=True)
+
+# --- mid-run resume -------------------------------------------------------------------------
+# init_from below only finds a COMPLETED run — trainer.save_model() writes OUTDIR itself, and
+# that happens after step 2500. A run killed at step 1400 leaves nothing there; all it leaves is
+# OUTDIR/checkpoint-1000/. Without the lookup here, re-running after an interruption silently
+# restarted from facebook/w2v-bert-2.0 and threw away every step. That matters because free
+# Lightning Studios stop every 4 hours and this run is ~16h on a T4: uninterrupted is the case
+# that never happens.
+#
+# Resuming restores optimizer state, LR schedule and step count from the checkpoint.
+from transformers.trainer_utils import get_last_checkpoint
+
+RESUME_CKPT = get_last_checkpoint(OUTDIR) if any(OUTDIR.glob("checkpoint-*")) else None
+RESUMED_STEP = int(Path(RESUME_CKPT).name.split("-")[1]) if RESUME_CKPT else 0
+# The training stream is an IterableDataset, so Trainer cannot seek into it — its batch-skip
+# would re-download and discard every audio file already consumed, which on a 16h run costs
+# roughly as much as the training it is trying to recover. We set ignore_data_skip=True and
+# reshuffle instead, offsetting the stream seed by the step we resumed at so the second leg
+# doesn't retrain on the exact prefix the first leg already saw.
+#
+# Reproducibility (the rules require a re-run to land in the same leaderboard position): an
+# uninterrupted run from an empty OUTDIR has RESUMED_STEP = 0, so STREAM_SEED == SEED and the
+# result is bit-identical to before this change. Only interrupted runs diverge, and only in
+# data order — which is unavoidable, since the interruption point isn't reproducible either.
+STREAM_SEED = SEED + RESUMED_STEP
+if RESUME_CKPT:
+    print(f"resuming from {RESUME_CKPT} (step {RESUMED_STEP} of {MAX_STEPS}); "
+          f"stream seed {STREAM_SEED}")
+else:
+    print("no checkpoint in OUTDIR — starting from step 0")
+
 BF16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
 print(f"cuda={torch.cuda.is_available()} bf16={BF16} n_gpu={torch.cuda.device_count()}")
 
@@ -285,17 +316,21 @@ def decode_audio_cell(cell) -> np.ndarray:
 
 
 def build(split: str):
+    # Train reshuffles on resume; validation must NOT. eval_ds is .take(400) off this stream,
+    # so a different seed would hand each leg of the run a different 400 clips, and
+    # metric_for_best_model would then be comparing scores measured on different data.
+    seed = STREAM_SEED if split == "train" else SEED
     parts, probs = [], []
     for lang, cfg in HF_CONFIGS.items():
         ds = load_dataset("google/WaxalNLP", cfg, split=split, streaming=True)
         ds = ds.cast_column("audio", Audio(sampling_rate=16000))
         if split == "train":
-            ds = ds.shuffle(seed=SEED, buffer_size=1500)
+            ds = ds.shuffle(seed=seed, buffer_size=1500)
         parts.append(ds)
         probs.append(LANG_WEIGHTS[lang])
     total = sum(probs)
     return interleave_datasets(parts, probabilities=[p / total for p in probs],
-                               seed=SEED, stopping_strategy="all_exhausted")
+                               seed=seed, stopping_strategy="all_exhausted")
 
 
 def prepare(batch: dict) -> dict:
@@ -366,7 +401,25 @@ def compute_metrics(pred) -> dict:
 
 
 # ---------------------------------------------------------------- model
-init_from = str(RESUME_DIR / "w2vbert-waxal") if (RESUME_DIR / "w2vbert-waxal").exists() else BASE
+def _has_weights(d: Path) -> bool:
+    """Directory existence is NOT the test. On Lightning ART() returns WORK, so
+    RESUME_DIR/'w2vbert-waxal' IS OUTDIR — which OUTDIR.mkdir() creates on line 144 and which
+    processor.save_pretrained() then fills with tokenizer files. The old `.exists()` check was
+    therefore true on a first run, and from_pretrained() would go looking for weights that
+    aren't there. Check for the weights themselves."""
+    return (d / "config.json").exists() and any(
+        (d / f).exists()
+        for f in ("model.safetensors", "pytorch_model.bin",
+                  "model.safetensors.index.json", "pytorch_model.bin.index.json")
+    )
+
+
+if RESUME_CKPT:                     # mid-run checkpoint wins: it is the newest state we have
+    init_from = RESUME_CKPT
+elif _has_weights(RESUME_DIR / "w2vbert-waxal"):
+    init_from = str(RESUME_DIR / "w2vbert-waxal")   # a previous run that reached the end
+else:
+    init_from = BASE
 print(f"initialising from: {init_from}")
 
 model = Wav2Vec2BertForCTC.from_pretrained(
@@ -418,6 +471,8 @@ args = TrainingArguments(
     seed=SEED,
     group_by_length=False,          # unavailable on a streaming dataset
     remove_unused_columns=False,
+    ignore_data_skip=True,          # see the resume block near the top
+    save_safetensors=True,
 )
 
 trainer = Trainer(
@@ -429,7 +484,7 @@ trainer = Trainer(
     compute_metrics=compute_metrics,
 )
 
-trainer.train()
+trainer.train(resume_from_checkpoint=RESUME_CKPT)
 trainer.save_model(str(OUTDIR))
 processor.save_pretrained(str(OUTDIR))
 print(f"\nsaved to {OUTDIR}")
