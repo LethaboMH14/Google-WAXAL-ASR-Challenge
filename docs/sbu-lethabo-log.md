@@ -155,3 +155,57 @@ designing it now, and if you want to take it instead, say so and it's yours.
 Open question I don't have an answer to yet, if you want to dig: do HPLT or GlotCC carry enough
 `luo` and `nyn` text to build KenLMs for them? If yes, the non-target clips get shallow fusion
 too and the phase-2 file improves a lot. If no, they get greedy MMS and that's the ceiling.
+
+---
+
+## 1 Aug — Lethabo: everything is on Kaggle now, and a real bug in the LM corpus
+
+**Lightning is out.** Not a preference — the paid GPUs are a rules problem ("no paid services or
+free trials that require a credit card") and the free tier can't carry stage 2. Everything runs on
+Kaggle from here. The cost of that call: the phase-1 and phase-2 CSVs you generated live on that
+studio, so as of this morning **we have no submission file at all**. That's the thing I'm fixing
+first, ahead of anything clever.
+
+**1. Kaggle's real constraint is 2 concurrent batch sessions, not the GPU count.** I found this by
+being refused: `Maximum batch GPU session count of 2 reached`. It counts CPU kernels too — our
+CPU LM kernel was holding the slot. So the 30 GPU-hours/week is the budget, but *two jobs at a
+time* is the schedule, and that's what actually decides the ordering. Worth knowing before you
+queue anything.
+
+**2. Stage 1 now has a kernel (`kaggle/kernels/baseline/`) and is queued behind the LM kernel.**
+It's the zero-shot MMS pass — no training, ~1.5 h, writes both phase CSVs — so it's what ends the
+no-submission state. Two things the wrapper adds around your script: it runs
+`local/validate_submission.py` on both CSVs *inside* the kernel, so a malformed file is caught
+before download rather than after it has burned one of five daily slots; and it deletes
+`phase2_audio.zip` from `/kaggle/working` afterwards, since everything there becomes the kernel's
+output and gets counted against the 20 GB cap.
+
+**3. Found a genuine bug in stage 0, and it's on the lever we care most about.** Train.csv is
+17,063 ASCII `'` and **zero** curly apostrophes — I counted — so `'` is the only apostrophe in the
+stage 2 CTC vocab. Scraped web text is the opposite: U+2019 everywhere. `normalise()` kept both
+characters and folded neither, while `CHARSET` comes from that Train-derived vocab. So we paid
+twice, silently: `acceptable()` drops a line once >2% of its characters are outside CHARSET, and
+one curly apostrophe in a short sentence is already ~1.5–3%, so whole sentences were being thrown
+out of the corpus over punctuation; and the longer lines that passed kept a character the acoustic
+model cannot emit, so pyctcdecode could never match those words. It bites hardest exactly where we
+need the LM most — Luganda's `ng'` digraph puts an apostrophe inside very common words.
+
+Fixed in `7b9cd95`. **Consequence: the LM kernel running right now was launched before the fix, so
+its corpus is the degraded one and needs a rebuild.** I'm letting it finish rather than killing it
+— it also produces the open-set LID number you asked for, which this bug doesn't touch — then
+rebuilding once stage 1 has its slot. If you get to it first, it's just a re-push of
+`kaggle/kernels/lm/`.
+
+**4. Stage 3 was reading its inputs from a mount name that never exists.** On Kaggle a kernel's
+output mounts at `/kaggle/input/<kernel-slug>`, so the checkpoint arrives as `waxal-stage2-train`
+and stage 1's lang_map as `waxal-baseline` — stage 3 asked for both under `waxal-ckpt`. The
+checkpoint load would have failed outright and the lang_map would have been silently skipped,
+re-LID'ing every clip. `ART()` now resolves by *content* (find the mount that actually contains
+`w2vbert-waxal` / `lm_corpus` / `lang_map.json`) with a `WAXAL_<NAME>` override, so renaming a
+kernel doesn't require editing the script. Also added a preflight: the model doesn't load until
+after ~5 GB of phase-2 audio has downloaded, so a missing checkpoint now fails in the first second
+and prints the mounts it can see.
+
+**5. Your open question is still open** (do HPLT/GlotCC carry enough `luo`/`nyn` text for KenLMs).
+The apostrophe fix makes it slightly more likely to be worth it, since the same fold applies to
+whatever those corpora give us. Still yours if you want it.
