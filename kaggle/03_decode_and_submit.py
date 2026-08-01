@@ -608,8 +608,35 @@ _BLANKS = ("<pad>", "[PAD]")
 _special_ids: list[int] = []
 
 
+def _ctc_output_width() -> int:
+    """How many columns the ACTIVE model's CTC head really emits."""
+    n = getattr(getattr(model, "lm_head", None), "out_features", None)
+    return int(n or model.config.vocab_size)
+
+
 def _labels_from_tokenizer() -> list[str]:
-    """CTC label list in id order, in pyctcdecode's convention: blank is "", delimiter is " "."""
+    """CTC label list in id order, in pyctcdecode's convention: blank is "", delimiter is " ".
+
+    Indexed BY TOKEN ID and sized from the MODEL's output width — never by len(vocab). Both of
+    those are load-bearing, and the old `sorted(vocab.items(), key=value)` enumeration got both
+    wrong on dmusingu/w2v-bert-2.0-luganda, which is what killed waxal-lugB on 1 Aug:
+
+        vocab.json  0='|'  [1 and 2 ABSENT]  3='a' 4='b' ... 28='’'  29='[UNK]'  30='[PAD]'
+        config.vocab_size = 31
+
+    The id space is SPARSE. Enumerating the sorted keys produces a dense 29-entry list, so 'a'
+    (id 3) lands at index 1 and every letter after the hole is shifted down by two — the decoder
+    then maps the model's logit columns onto the wrong characters. pyctcdecode happened to catch
+    this one on length (29 labels vs 31 columns, ValueError in the worker), but that was luck:
+    a vocab with a hole AND two trailing specials would have matched on length and silently
+    produced fluent-looking rubbish, which is far more expensive than a crash.
+
+    MMS's own vocabs are dense (waxal-lug: ids 0..37 + <s>/</s> at 38/39 via added_tokens), which
+    is why lin and sna swept their grids cleanly and why this never fired before.
+
+    Unmapped ids get a masked placeholder rather than being skipped: holding the position is the
+    whole point, and a column the tokenizer cannot name is one no transcript should ever contain.
+    """
     global _special_ids
     if BACKEND == "whisper":
         # Whisper is seq2seq — there is no CTC alphabet and nothing here applies. Return empty
@@ -626,22 +653,32 @@ def _labels_from_tokenizer() -> list[str]:
     if vocab_dict and all(isinstance(v, dict) for v in vocab_dict.values()):
         active = getattr(processor.tokenizer, "target_lang", None)
         vocab_dict = vocab_dict.get(active) or next(iter(vocab_dict.values()))
-    sorted_vocab = [k for k, _ in sorted(vocab_dict.items(), key=lambda kv: kv[1])]
-    _special_ids = [i for i, t in enumerate(sorted_vocab) if t in _NEVER_EMIT]
-    out = []
-    for i, t in enumerate(sorted_vocab):
+    by_id = {int(i): t for t, i in vocab_dict.items()}
+    # Trust whichever is larger. A head narrower than the vocab would mean labels the model can
+    # never emit; a head wider means columns the tokenizer cannot name. Both are survivable, but
+    # truncating the alphabet to the smaller of the two is not — that reintroduces the shift.
+    width = max(_ctc_output_width(), max(by_id) + 1 if by_id else 0)
+    _special_ids = []
+    out: list[str] = []
+    for i in range(width):
+        t = by_id.get(i)
         if t in _BLANKS:
             out.append("")                     # w2v-bert uses [PAD]; MMS uses <pad>
         elif t == "|":
             out.append(" ")                    # both use | as the word delimiter
-        elif t in _NEVER_EMIT:
-            # One control char each: unique (pyctcdecode forbids duplicates), absent from every
-            # transcript, and SINGLE-character so the alphabet stays char-type. Multi-char entries
-            # make pyctcdecode warn that it cannot tell whether the alphabet is BPE, which is a
-            # confusing thing to leave in a log for tokens that can never be emitted anyway.
-            out.append(chr(1 + _NEVER_EMIT.index(t)))
+        elif t is None or t in _NEVER_EMIT:
+            # <s>, </s>, <unk> and unnamed ids all get a private-use char: unique (pyctcdecode
+            # forbids duplicates), SINGLE-character so the alphabet stays char-type rather than
+            # tripping pyctcdecode's BPE guess, and impossible in any transcript. They are also
+            # masked out of the logits in logits_for(), so they can never win a beam OR an
+            # argmax — the placeholder is only here to hold the column's position.
+            _special_ids.append(i)
+            out.append(chr(0xE000 + i))
         else:
             out.append(t)
+    n_named = sum(1 for i in range(width) if i in by_id)
+    print(f"    alphabet: {width} labels for a {_ctc_output_width()}-wide head "
+          f"({n_named} named, {len(_special_ids)} masked)")
     return out
 
 
