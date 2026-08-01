@@ -69,8 +69,33 @@ if Path("/kaggle/working").exists():
         _repo_zindi = Path.cwd() / "data" / "zindi"
     ZINDI_DIR = Path(os.environ["WAXAL_ZINDI_DIR"]) if os.environ.get("WAXAL_ZINDI_DIR") else (
         _ds if _ds.exists() else _repo_zindi)
+    # Artefact names are NOT mount names on Kaggle. A kernel's output mounts at
+    # /kaggle/input/<kernel-slug>, so stage 2's checkpoint arrives as `waxal-stage2-train` and
+    # stage 1's lang_map as `waxal-baseline` — while an uploaded Dataset arrives under whatever
+    # it was named. Hard-coding either spelling means stage 3 dies on a missing path after the
+    # models have loaded. Resolve by CONTENT instead: look for the mount that actually holds the
+    # artefact. WAXAL_<NAME> overrides it outright when a run needs a specific one.
+    _MARKER = {
+        "waxal-ckpt": "w2vbert-waxal",                    # stage 2: the fine-tuned model dir
+        "waxal-lm": "lm_corpus",                          # stage 0: the KenLM text
+        "waxal-baseline": "lang_map.json",                # stage 1: the LID routing decisions
+    }
+
     def ART(name: str) -> Path:
-        return Path("/kaggle/input") / name               # <- the Dataset you attached
+        override = os.environ.get("WAXAL_" + name.replace("-", "_").upper())
+        if override:
+            return Path(override)
+        direct = Path("/kaggle/input") / name
+        if direct.exists():
+            return direct
+        marker = _MARKER.get(name)
+        if marker:
+            for cand in sorted(Path("/kaggle/input").glob("*")):
+                if (cand / marker).exists():
+                    return cand
+        # Nothing matched. Return the name we were asked for so the caller's own error names it,
+        # rather than inventing a path that exists but holds the wrong thing.
+        return direct
 else:
     ENV = "lightning" if Path("/teamspace/studios/this_studio").exists() else "local"
     try:
@@ -105,6 +130,24 @@ if int(_ds.__version__.split(".")[0]) >= 4:
 CKPT = ART("waxal-ckpt") / "w2vbert-waxal"                # stage 2 output
 LM_CORPUS_DIR = ART("waxal-lm") / "lm_corpus"             # stage 0 output
 PHASE2_URL = "https://storage.googleapis.com/waxalphase2/audio.zip"
+
+# Preflight. The model does not load until after ~5 GB of phase-2 audio has downloaded and been
+# decoded, so a wrong or unattached checkpoint mount otherwise announces itself half an hour into
+# a GPU session. Check the inputs first — this costs a stat() call.
+if not CKPT.exists():
+    raise SystemExit(
+        f"\n  no fine-tuned checkpoint at {CKPT}"
+        f"\n  mounts present: {[p.name for p in sorted(Path('/kaggle/input').glob('*'))] if Path('/kaggle/input').exists() else 'none'}"
+        "\n\n  Attach the stage 2 kernel's output (kernel_sources) or set WAXAL_WAXAL_CKPT"
+        "\n  to the directory that CONTAINS w2vbert-waxal.\n")
+if not LM_CORPUS_DIR.exists():
+    # Survivable, and quietly so — which is the danger. corpus_lines() falls back to building
+    # each KenLM from Train.csv alone, so shallow fusion still happens and nothing errors; the
+    # LM is just trained on a fraction of the text and gives back a fraction of the win. That
+    # reads as a disappointing score rather than as a missing input, so say it here.
+    print(f"\n!! no LM corpus at {LM_CORPUS_DIR} — every language will fall back to a "
+          f"Train.csv-only LM (marked WEAK below).\n"
+          f"!! Attach the waxal-lm kernel output unless you are deliberately measuring that.\n")
 
 LANGS = ["lin", "sna", "lug"]
 HF_CONFIGS = {"lin": "lin_asr", "sna": "sna_asr", "lug": "lug_asr"}
@@ -401,7 +444,7 @@ needed = set(needed_ids)
 print(f"submission contract: {len(needed_ids):,} unique ids across {len(TEMPLATES)} template(s)")
 
 audio_store, known_lang = {}, {}
-_lang_map = ART("waxal-ckpt") / "lang_map.json"           # stage 1 wrote it; reuse, don't re-LID
+_lang_map = ART("waxal-baseline") / "lang_map.json"       # stage 1 wrote it; reuse, don't re-LID
 if _lang_map.exists():
     known_lang = json.load(open(_lang_map))
 
