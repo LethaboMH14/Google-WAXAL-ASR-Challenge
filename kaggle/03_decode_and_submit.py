@@ -134,7 +134,17 @@ if int(_ds.__version__.split(".")[0]) >= 4:
 
 
 CKPT = ART("waxal-ckpt") / "w2vbert-waxal"                # stage 2 output
-LM_CORPUS_DIR = ART("waxal-lm") / "lm_corpus"             # stage 0 output
+
+# WAXAL_LM_CORPUS_DIR overrides where stage 0's text is read from. ART("waxal-lm") assumes the
+# corpus arrives as the waxal-lm kernel's output mounted at /kaggle/input/waxal-lm — and on
+# 1 Aug that assumption silently produced nothing: kernel_sources named waxal-lm, Kaggle's own
+# stored metadata confirmed it, and /kaggle/input still had no lm_corpus. Both scored
+# submissions were decoded without a real LM, partly because of this. A caller that has
+# LOCATED the corpus (waxal-lugA rglobs for lug.txt, so it works off a Dataset mount or a
+# kernel mount) can now say where it is instead of re-deriving the same broken path.
+LM_CORPUS_DIR = (Path(os.environ["WAXAL_LM_CORPUS_DIR"])
+                 if os.environ.get("WAXAL_LM_CORPUS_DIR")
+                 else ART("waxal-lm") / "lm_corpus")       # stage 0 output
 PHASE2_URL = "https://storage.googleapis.com/waxalphase2/audio.zip"
 
 # Preflight. The model does not load until after ~5 GB of phase-2 audio has downloaded and been

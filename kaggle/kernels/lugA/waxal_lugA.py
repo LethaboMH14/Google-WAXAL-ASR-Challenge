@@ -82,16 +82,27 @@ if not torch.cuda.is_available():
 # The lineup run failed silently on exactly this and cost an hour producing a greedy file we
 # then submitted. A missing mount is not allowed to degrade quietly into the thing this run
 # exists to replace.
-CORPUS = Path("/kaggle/input/waxal-lm/lm_corpus")
-LUG_TXT = CORPUS / "lug.txt"
-if not LUG_TXT.exists():
-    found = sorted(str(p) for p in Path("/kaggle/input").glob("*/lm_corpus/*.txt"))
+#
+# v1 of this kernel hard-coded /kaggle/input/waxal-lm/lm_corpus and died with "visible: none"
+# even though kernel_sources named waxal-lm and Kaggle's stored metadata confirmed it. Rather
+# than keep guessing at the mount layout, FIND the corpus: any depth, either mechanism
+# (kernel_sources mount or an attached Dataset). Stage 3 is then pointed at whatever we found
+# via WAXAL_LM_CORPUS_DIR instead of inheriting the same hard-coded assumption.
+_hits = sorted(Path("/kaggle/input").rglob("lug.txt"))
+if not _hits:
+    tree = sorted(str(p) for p in Path("/kaggle/input").glob("*/*"))[:60]
     raise SystemExit(
-        f"{LUG_TXT} is missing — add lethabomh14/waxal-lm to kernel_sources and re-push.\n"
-        f"  corpus files visible under /kaggle/input: {found or 'none'}\n"
-        f"  Refusing to fall through to the Train.csv-only LM: that is a 177k-word corpus for a\n"
-        f"  5-gram, which the paper measures as WORSE than greedy, and this run's entire purpose\n"
-        f"  is to measure real shallow fusion.")
+        "no lug.txt anywhere under /kaggle/input — the LM corpus did not mount.\n"
+        f"  what IS mounted: {tree or 'NOTHING — /kaggle/input is empty'}\n"
+        "  Attach lethabomh14/waxal-lm-corpus as a dataset_source (or waxal-lm as a\n"
+        "  kernel_source) and re-push.\n"
+        "  Refusing to fall through to the Train.csv-only LM: that is a 177k-word corpus for a\n"
+        "  5-gram, which the paper measures as WORSE than greedy, and this run's entire purpose\n"
+        "  is to measure real shallow fusion.")
+LUG_TXT = _hits[0]
+CORPUS = LUG_TXT.parent
+print(f"\nfound LM corpus at {CORPUS}")
+print(f"  files: {sorted(p.name for p in CORPUS.glob('*.txt'))}")
 _words = sum(len(line.split()) for line in LUG_TXT.read_text(encoding="utf-8").splitlines())
 print(f"\nLM corpus: lug.txt {_words:,} words")
 if _words < 2_000_000:
@@ -116,6 +127,7 @@ env.update(
     WAXAL_BACKEND="mms",
     WAXAL_ASR_MODEL=ASR_MODEL,
     WAXAL_LANG_MAP=str(LANG_MAP),
+    WAXAL_LM_CORPUS_DIR=str(CORPUS),   # the corpus we FOUND, not the one stage 3 would assume
     WAXAL_RUN_TAG=RUN_TAG,
     # WAXAL_NO_LM is deliberately NOT set. This is the whole experiment.
 )
