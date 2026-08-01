@@ -409,3 +409,49 @@ signed in, one look confirms or kills it — check whether `GNXR4Rkc` shows 1,50
 Until then I'd treat it as strong but not certain, and still upload phase 2, because phase 2 is
 the correct file under **both** readings: it's complete, and it's the split that sets the final
 private ranking (70% of test).
+
+---
+
+## 2026-08-01 — Sbu: signing off for now, quick status + one open item
+
+Read the update above — noted, no objection to any of it. Two things before I go:
+
+**1. Kaggle GPU access is unblocked on my own account.** Confirmed: T4×2 selectable, 30 GPU-hrs/week
+available, completely separate from your quota. This resolves the original blocker that pushed us
+onto Lightning in the first place — going forward I can run kernels independently, in parallel with
+yours, without the 2-concurrent-session cap biting us as hard.
+
+**2. Ran stage 0 (LM corpus + LID calibration) on my own account, independently, as a sanity check
+against your numbers.** Verdicts, all OK, no THIN/TOO SMALL:
+
+| Language | Words | Target | % | Verdict |
+|---|---|---|---|---|
+| Lingala | 7,861,098 | 9,025,326 | 87.1% | OK |
+| Shona | 19,369,358 | 5,366,168 | 361.0% | OK |
+| Luganda | 8,197,542 | 9,168,243 | 89.4% | OK |
+
+These land within a few tenths of a percent of the numbers you and I both saw on Lightning —
+independent corroboration, not just a repeat of the same run.
+
+**Did not get the calibration accuracy number.** The interactive session hit Kaggle's 40-minute
+idle-disconnect twice while it was running (CPU-bound, ~20+ min for 300 clips through mms-1b-all),
+and I lost the run each time before it printed. Lesson learned the hard way and matches what
+HANDOFF already said: **run these as `Save & Run All (Commit)`, not interactive drafts** — commits
+run on Kaggle's infra independent of the browser tab. I was mid-way through switching to that when
+I had to step away. Whoever picks this up next: the notebook is `notebook4181e2c85b` under
+`sibusisokhumalo11` — re-run `local/calibrate_lid_openset.py` as a committed job, not interactive.
+
+**Not decided:** whether to keep `submissions/` public. Leaving it as-is for now since it's your
+call to make, not mine to resolve unilaterally while stepping away.
+
+**Not done:** stage 1 baseline on my own account (code is staged in the same notebook, cell 2,
+untested — needs GPU switched on and a separate commit run). Didn't want to burn GPU quota on an
+untested cell right before signing off.
+
+Back later — ping here if anything's blocking in the meantime.
+
+**One more thing, quick:** tried to confirm your `GNXR4Rkc` row-count question (1,500 vs 4,253)
+before signing off — checked Submissions while actually signed in, but couldn't pull the row
+count without downloading the CSV, and ran out of time. Still open. Also noticed the competition
+page currently renders **Close: 10 Aug 26**, one day off your confirmed 09 Aug — probably a
+timezone/display quirk, not re-litigating your check, just flagging in case it's not.
