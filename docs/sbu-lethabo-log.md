@@ -209,3 +209,69 @@ and prints the mounts it can see.
 **5. Your open question is still open** (do HPLT/GlotCC carry enough `luo`/`nyn` text for KenLMs).
 The apostrophe fix makes it slightly more likely to be worth it, since the same fold applies to
 whatever those corpora give us. Still yours if you want it.
+
+## 1 Aug — Lethabo: stage 2 collapsed to blank. w2v-bert is dropped; MMS is the plan.
+
+**Read this before touching `kaggle/02_train_w2vbert.py`. It does not work and I am not fixing it before close.**
+
+Leg 1 of the w2v-bert fine-tune ran its full 7.5 h on a T4 and produced a model that transcribes
+nothing. The wall-clock stop behaved perfectly — stopped and saved at step 998 — which is what
+made this easy to misread as a success. It is not one:
+
+| step | eval_loss | eval_wer | eval_cer | eval_score |
+|------|-----------|----------|----------|------------|
+| 250  | 5.27      | 1.000    | 1.000    | 0          |
+| 500  | 2.982     | 1.000    | 1.000    | 0          |
+| 750  | 2.967     | 1.000    | 1.000    | 0          |
+| 998  | 2.961     | 1.000    | 1.000    | 0          |
+
+WER and CER of *exactly* 1.000 means every hypothesis decoded to the empty string. Train loss
+went 154 -> 24.0 by step ~400 and then moved by less than 1% over the next 600 steps
+(24.17, 24.08, 24.06, 23.99, 24.13, 24.07, 23.93, 23.92, 24.02, 23.88) while grad_norm fell
+167 -> 2. Divide the logged train loss by GRAD_ACCUM=8 and you get ~3.0, which matches eval_loss
+2.96 and sits just under ln(46)=3.83 for our 46-token vocab. That is CTC blank collapse: the
+model found the all-blank solution, the gradient vanished, and it stayed there.
+
+**Two traps in the artefacts, both of which cost me time:**
+
+1. **The saved model is step 250, not step 998.** `metric_for_best_model="score"` +
+   `greater_is_better=True` + every eval scoring 0 means checkpoint-250 was never beaten (a tie
+   does not displace the incumbent). `save_total_limit=1` then rotated 500/750/998 away, and
+   `load_best_model_at_end=True` reloaded checkpoint-250 before the final `save_model`. The
+   only checkpoint dir in the output is `checkpoint-250`. The step-998 weights are gone.
+2. **Do not push "leg 2".** The LR-annealing arithmetic in `kaggle/kernels/stage2/waxal_stage2.py`
+   is correct and completely beside the point — a well-annealed schedule on a collapsed model
+   still emits blanks. Resuming would have burned another 7.5 h to extend a flat line.
+
+**Why it collapsed (my read, stated as a hypothesis, not a finding).** The CTC head is randomly
+initialised (`ignore_mismatched_sizes=True`, vocab 46) and WAXAL utterances are long — 176 chars
+/ 26 words on average, up to 20 s. Blank is a deep local minimum for CTC and it gets deeper the
+longer the target sequence, so a fresh head on long audio is close to the worst case for
+bootstrapping an alignment. I did NOT prove this. I checked and cleared the cheap suspects: the
+frame-rate maths is right (add_adapter=False -> 50 Hz -> SAMPLES_PER_FRAME=320), the `keep()`
+length filter enforces 1.5x frame headroom, the vocab is sane, gradient clipping is on at the
+default 1.0, and HF computes the CTC log_softmax in fp32 so this is not fp16 underflow.
+
+**The decision: stop fine-tuning w2v-bert, use MMS.** `facebook/mms-1b-all` already ships trained
+CTC adapters for lin/sna/lug. Its heads are pretrained, not random, so the whole failure mode
+above is structurally impossible there. Two days to close is not the time to debug a 581M-param
+bootstrap. Concretely:
+
+- **Stage 1 (MMS zero-shot) is unaffected and still running.** It is our first real score and it
+  never depended on stage 2.
+- **Stage 3 gets retargeted onto MMS.** KenLM shallow fusion is the dominant lever in the paper
+  (lug 39.75 -> 16.30 WER, sna 22.56 -> 9.28) and it never needed the fine-tune — it needs
+  logits, and MMS produces good ones today. Note stage 1 argmaxes its logits inline and does not
+  persist them, so fusion is a fresh decode pass, not a post-process on stage 1's CSV.
+- **The one real refactor:** stage 3 builds `labels` once from `processor.tokenizer.get_vocab()`.
+  MMS swaps vocabulary per language on `set_target_lang()`, so that has to move inside the
+  per-language loop, and MMS takes `input_values` (raw waveform) where w2v-bert takes
+  `input_features`.
+
+**Sbu — the one thing I want your eyes on:** if we get spare GPU quota, is fine-tuning the MMS
+*adapters* (~2M params/lang, pretrained heads) worth it over just decoding zero-shot MMS with a
+good KenLM? My instinct is the KenLM is worth more per GPU-hour and carries far less risk, but
+that is an instinct, not a measurement.
+
+`kaggle/02_train_w2vbert.py` stays in the repo unchanged — the rules can ask for our code and the
+failed attempt is part of the honest record.
