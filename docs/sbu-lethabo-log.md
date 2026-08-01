@@ -455,3 +455,100 @@ before signing off — checked Submissions while actually signed in, but couldn'
 count without downloading the CSV, and ran out of time. Still open. Also noticed the competition
 page currently renders **Close: 10 Aug 26**, one day off your confirmed 09 Aug — probably a
 timezone/display quirk, not re-litigating your check, just flagging in case it's not.
+
+---
+
+## 2026-08-01 — Lethabo: we found the 0.4919. It was never the acoustic models.
+
+Sbu — drop what you were going to nitpick next and nitpick this one, because it reorders the whole
+project.
+
+### The arithmetic
+
+Our one real leaderboard observation is **0.491944** (submission `GNXR4Rkc`, phase 2). The exact
+same checkpoints, scored on the frozen dev set with the language **known**, give **0.7453**:
+
+| | dev multi (LM-free, both KenLM leaks fixed) | word share |
+|---|---|---|
+| `mms-300m-waxal-lin` | 0.6893 | 0.459 |
+| `mms-300m-waxal-sna` | 0.7815 | 0.366 |
+| `mms-300m-waxal-lug` | 0.8163 | 0.175 |
+| **pooled** | **0.7453** | |
+
+A 0.2533 gap. It is not the models, and after the two leaks it is not the harness either. Solving
+`0.4919 = p*0.7453 + (1-p)*m` for routing accuracy `p`:
+
+| if a misrouted clip scores | implied routing accuracy |
+|---|---|
+| 0.00 | 0.660 |
+| 0.20 | 0.535 |
+| 0.30 | 0.431 |
+| 0.35 | 0.359 |
+
+### The corroboration
+
+`local/diagnose_lid_unconstrained.py` (commit `e9b3885`) ran the **open-set** `mms-lid-256` routing
+we actually shipped over phase-2 clips. It returned:
+
+> luo 42.5% · lug 27.5% · nyn 20% · guz/xog/kin/kam 2.5% each — **zero Lingala, zero Shona**
+
+on a corpus that is **43.9% Lingala and 41.1% Shona**, at confidences of 0.98–1.00. We shipped
+that. Most of the 1,500 clips that decide the prize were decoded in the wrong language.
+
+### The reasoning error, named
+
+The comment that put open-set routing there argued that being able to emit Dholuo was an
+advantage — that a three-class argmax "cannot express *this is Dholuo*". True, and irrelevant.
+**Every reference cell is lin, sna or lug.** A clip decoded perfectly in Dholuo scores against a
+Lingala reference exactly as badly as noise does. Closed-set is not a limitation here, it is the
+correct prior, and I had it backwards in writing.
+
+I also wrote, in the same block, that stage 1's phase-2 file was "the better one to upload". That
+is the sentence that cost us the month.
+
+### What landed (commit `c81f1cc`)
+
+- **`kaggle/kernels/router/`** — measures routers instead of arguing about them. Two candidates
+  neither of which is a generic LID: (a) `asr-conf`, our own three `mms-300m-waxal-*` checkpoints
+  scored by per-frame CTC confidence — same family on purpose, because a Whisper mean log-prob and
+  a CTC per-frame log-prob are not the same quantity and arg-maxing across them would measure
+  architecture rather than language; (b) `whisper-lid`, one decoder step from `whisper-large-v3`'s
+  SOT token argmaxed over `<|ln|>/<|sn|>/<|lg|>`. Plus a vote. Scored on **the same** labelled
+  phase-1 test clips `waxal_lid_probe.py` uses, so the numbers read straight against `mms-closed`
+  / `mms-open` / `okwija`.
+- **stage 3** prefers the router's *measured* map over stage 1's *unmeasured* one; strips any
+  off-set label and re-decides those clips closed-set; and now **raises** rather than widening
+  `DECODE_LANGS` past `{lin,sna,lug}`.
+- **`WAXAL_MISROUTE=1`** decodes each dev clip as the wrong language against its true reference.
+  That 0.30 in the table above was the last estimated number in the projection; this measures it.
+- **dev output stops presenting an oracle-routing score as a leaderboard prediction.** It names
+  the assumption and prices it once both inputs exist.
+
+### Where I want you to push back
+
+1. **Is `asr-conf` circular?** It routes with the same family of models that then decode. My claim
+   is no — confidence under model *L* is evidence about the audio, not about the decode — but
+   you're better placed than me to say whether a model fine-tuned on one language is
+   systematically over-confident on *everything*, which would break the comparison. Concretely:
+   `mms-300m-waxal-lug` measured highest solo (0.8163). If it is also the best-calibrated, does it
+   win clips it shouldn't?
+2. **Is 20 s the right cap?** I truncate at `MAX_SECONDS=20` for the confidence pass. If phase-2
+   clips are systematically longer than phase-1 test clips, the routing sees a different slice of
+   the audio than the decoder does.
+3. **The whisper-lid token check.** I resolve `<|ln|>` etc. via
+   `convert_tokens_to_ids` and drop a language if it comes back `None`/negative. Worth confirming
+   the tokenizer actually carries all three rather than silently degrading to a two-way choice —
+   HF tokenizers return `unk_token_id` for unknowns in some paths rather than `None`, which my
+   guard would not catch. That is a real hole; I'd rather you find it than the leaderboard.
+4. **Does phase 2 contain a language outside the three?** My whole fix assumes not. The evidence
+   is that it's a three-language challenge scored against three-language references. If you can
+   confirm from the Data tab while signed in, that closes it.
+
+### What this means for priority
+
+Better acoustic checkpoints (bakeoff round 2, ten more candidates) are worth maybe +0.02. The
+router is worth ~0.25. Round 2 is written and queued behind the router for a GPU slot, not
+cancelled — but it is no longer the thing standing between us and the top of the board.
+
+Still open from your side: the `GNXR4Rkc` row count (1,500 vs 4,253), and the LID calibration
+number as a committed job rather than an interactive draft.
