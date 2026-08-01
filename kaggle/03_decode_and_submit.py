@@ -798,6 +798,16 @@ tuned = {}
 for lang, cfg in HF_CONFIGS.items():
     if lang not in lm_paths:
         continue
+    # Whisper is seq2seq: no frame logits, so there is nothing for KenLM to rescore and nothing
+    # for logits_for() to return. The dev-decode site has always guarded this; here and at the
+    # final decode it was missing, and it never fired only because every Whisper run so far set
+    # WAXAL_NO_LM=1 — which empties lm_paths and skips this loop wholesale. The moment a mixed
+    # lineup pairs a Whisper language with a real LM (waxal-lugC), set_language() sets labels=[]
+    # and logits_for() calls a seq2seq forward with no decoder_input_ids. Same latent shape as
+    # the pyctcdecode pool bug: a path that only exists once the LM is genuinely switched on.
+    if BACKENDS.get(lang, BACKEND) == "whisper":
+        print(f"  {lang}: whisper (seq2seq) — no CTC logits, skipping LM tuning for this language")
+        continue
     # BEFORE logits_for, not just before make_decoder: on MMS the adapter decides what the
     # logits MEAN, so tuning alpha/beta against another language's adapter would tune on noise.
     set_language(lang)
@@ -1320,7 +1330,11 @@ print(pd.Series([known_lang.get(i, "??") for i in needed_ids]).value_counts().to
 decoders = {}
 for lang in LANGS:
     t = tuned.get(lang)
-    decoders[lang] = make_decoder(lang, t["alpha"], t["beta"]) if t and t["alpha"] is not None else None
+    # Same whisper guard as the dev-decode site above. Redundant once the tuning loop refuses to
+    # tune a seq2seq language (so `t` is None here anyway) — kept because the two sites must not
+    # be able to disagree about which languages own a CTC decoder.
+    decoders[lang] = make_decoder(lang, t["alpha"], t["beta"]) \
+        if BACKENDS.get(lang, BACKEND) != "whisper" and t and t["alpha"] is not None else None
 
 # DECODE_LANGS used to extend past LANGS so that clips stage 1 routed to luo/nyn/xog/kam/kin could
 # be decoded with those MMS adapters. That is gone: every reference cell is lin, sna or lug, so
