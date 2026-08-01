@@ -269,6 +269,23 @@ def indomain(lang: str) -> list[str]:
     rows = tr
     if lcol:
         rows = tr[tr[lcol].astype(str).str.lower().str[:3] == lang]
+    # HOLD THE DEV SET OUT. Train.csv contains the `original_split == "validation"` rows that ARE
+    # the 900-clip dev set, and this text is then repeated INDOMAIN_REPEAT times into the corpus.
+    # An LM that has memorised the dev references — at several times their natural weight — makes
+    # the dev harness report a score the leaderboard will never reproduce. That mistake cost us a
+    # +0.2473 phantom bias (see kaggle/03_decode_and_submit.py, `DEV_IDS`). Unconditional, because
+    # 900 sentences out of ~884k in-domain words is below the LM's noise floor, and a flag is a
+    # thing you can forget to set.
+    icol = next((c for c in tr.columns if c.lower() in ("id", "audio_id", "utt_id")), None)
+    dev_path = Path(__file__).resolve().parents[1] / "local" / "harness" / "devset.json"
+    if icol and dev_path.exists():
+        dev_ids = {it["id"] for it in json.load(open(dev_path, encoding="utf-8"))["items"]}
+        before = len(rows)
+        rows = rows[~rows[icol].astype(str).isin(dev_ids)]
+        print(f"  {lang}: held {before - len(rows):,} dev sentences out of the LM corpus")
+    else:
+        print(f"  !! {lang}: devset.json not found — the LM may contain dev text, and any dev "
+              f"score measured with it will be inflated")
     lines = [normalise(t) for t in rows[tcol].dropna().astype(str)]
     return [l for l in lines if l]
 

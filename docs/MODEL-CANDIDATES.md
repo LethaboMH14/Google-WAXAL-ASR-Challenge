@@ -1,8 +1,14 @@
-# Open WAXAL checkpoints — survey, access status, and why punctuation decides this competition
+# Open WAXAL checkpoints — survey, access status, and the measured bakeoff
 
 *Measured 2026-08-01. Every access status below was verified by an actual `hf_hub_download`, not
 by reading a model card — `model_info()` succeeds on gated repos and returns metadata happily,
 so "the API answered" is not evidence that we can load the weights.*
+
+> **Read "The bakeoff — measured, and it overturned the thesis above" at the bottom of this file
+> first.** Everything before it was arithmetic on other people's published numbers, and one of its
+> conclusions — that punctuation rather than the acoustic model was the lever that beats the
+> leaders — is **wrong**. It is left in place, marked, because the reasoning is worth keeping
+> visible next to the measurement that overturned it.
 
 ## Why this survey exists
 
@@ -42,9 +48,11 @@ That is not a coincidence, and the download counts agree: across the `waxal-benc
 checkpoints for our three competition languages have 5–40× the downloads of the same org's other
 languages (`lin` 404, `sna` 434, `lug` 609 vs `mas` 148, `amh` 32, `mlg` 9).
 
-**Conclusion: the leaders are running these checkpoints, and the way past them is punctuation, not
-a bigger acoustic model.** A stronger encoder moves WER; punctuation moves a term that everyone
-above us is currently paying in full.
+**Conclusion (first half stands, second half was WRONG): the leaders are running these
+checkpoints** — that part survived. ~~and the way past them is punctuation, not a bigger acoustic
+model~~ — this did not. The bakeoff measured a **+0.0895** acoustic gain on Lingala against
+**+0.004** from punctuation on the same language. Punctuation is real but it is a rounding error
+next to picking the right checkpoint. See the bakeoff section at the bottom.
 
 ## Punctuation statistics (our dev set, n=900, 23,226 ref words)
 
@@ -110,18 +118,86 @@ fallback.
 | `waxal-benchmarking/mms-300m-waxal-{lin,sna,lug}` | Wav2Vec2ForCTC | all | none |
 | `Okwija/waxal-lid-lin-sna-lug` | Wav2Vec2ForSequenceClassification | LID | — |
 
-A fully-open, punctuation-capable lineup therefore already exists:
+A fully-open, punctuation-capable lineup therefore already exists — **this was the PREDICTION, and
+the bakeoff got two of the three wrong:**
 
-- **lin** → `keystats/lingala-xlsr-waxal-finetuned`
-- **sna** → `Mubarak127/waxal-whisper-large-v3-sna_asr` (Whisper emits punctuation natively)
-- **lug** → `douyeszn/w2vbert-lug-waxal-aug`
+| | predicted from vocab | measured winner | what happened |
+|---|---|---|---|
+| lin | `keystats/lingala-xlsr-waxal-finetuned` | `douyeszn/w2vbert-lin-waxal-aug-ft` | keystats 0.6966 vs w2vbert 0.7788 — having punctuation in the vocab did not compensate for a weaker encoder |
+| sna | `Mubarak127/waxal-whisper-large-v3-sna_asr` | same | the one prediction that held |
+| lug | `douyeszn/w2vbert-lug-waxal-aug` | `waxal-benchmarking/mms-300m-waxal-lug` | the w2vbert scored **0.0000** — CTC blank collapse, WER and CER exactly 1.000 |
+
+Picking checkpoints by what is in their `vocab.json` is not a substitute for running them.
 
 `Okwija/waxal-lid-lin-sna-lug` matters separately: phase 2 ships audio with **no language
 metadata**, so language ID is part of the task. It is a purpose-built classifier for exactly our
 three languages and should be measured against our existing 97.7% open-set router.
 
-## What is NOT settled
+## The bakeoff — measured, and it overturned the thesis above
 
-Every projection above is arithmetic on other people's published numbers, on their test split, and
-not one of these checkpoints has yet been run through our own dev harness. That is what the
-bakeoff kernel is for. Nothing here gets submitted on the strength of a table.
+Kernel `lethabomh14/waxal-bakeoff` v1, 2026-08-01. Ten candidates, each scored on the frozen
+900-clip dev set (`local/harness/devset.json`, seed 1337), each language's own control run first.
+**`WAXAL_NO_LM=1` throughout** — no KenLM shallow fusion, so none of these numbers can be
+contaminated by the corpus leak described below. `multi` = `0.5(1-WER) + 0.5(1-CER)`, the
+competition metric.
+
+| tag | lang | multi | WER | CER | +period | checkpoint |
+|---|---|---|---|---|---|---|
+| lin-control | lin | 0.6893 | 0.4379 | 0.1835 | 0.6924 | `waxal-benchmarking/mms-300m-waxal-lin` |
+| lin-xlsr | lin | 0.6966 | 0.4293 | 0.1774 | 0.7001 | `keystats/lingala-xlsr-waxal-finetuned` |
+| **lin-w2vbert** | lin | **0.7788** | 0.3170 | 0.1255 | **0.7828** | `douyeszn/w2vbert-lin-waxal-aug-ft` |
+| sna-control | sna | 0.7815 | 0.3553 | 0.0818 | 0.7980 | `waxal-benchmarking/mms-300m-waxal-sna` |
+| **sna-whisper** | sna | **0.8034** | 0.2861 | 0.1072 | 0.7853 | `Mubarak127/waxal-whisper-large-v3-sna_asr` |
+| sna-drewmens | sna | FAILED | — | — | — | `DrewMens/mms-waxal-shona` (no result file written) |
+| **lug-control** | lug | 0.8163 | 0.3032 | 0.0641 | **0.8286** | `waxal-benchmarking/mms-300m-waxal-lug` |
+| lug-dhasmana | lug | 0.8141 | 0.3064 | 0.0655 | 0.8259 | `dhasmana/WAXAL-lug-ful-w2v-bert-2.0` |
+| lug-whisper | lug | 0.8210 | 0.2569 | 0.1011 | 0.8090 | `cdli/whisper-large-v3_finetuned_ugandan_luganda_waxal` |
+| lug-w2vbert | lug | 0.0000 | 1.0000 | 1.0000 | 0.0000 | `douyeszn/w2vbert-lug-waxal-aug` — blank collapse |
+
+### The lineup this selects
+
+| lang | share of ref words | checkpoint | backend | trailing `.` | multi |
+|---|---|---|---|---|---|
+| lin | 45.9% | `douyeszn/w2vbert-lin-waxal-aug-ft` | waxalnet (CTC) | **yes** | 0.7828 |
+| sna | 36.6% | `Mubarak127/waxal-whisper-large-v3-sna_asr` | whisper (seq2seq) | **no** | 0.8034 |
+| lug | 17.5% | `waxal-benchmarking/mms-300m-waxal-lug` | waxalnet (CTC) | **yes** | 0.8286 |
+
+Word-weighted estimate **0.7984**, against 0.7257 at rank 1 and our current 0.4919. The weighting
+is an approximation — jiwer pools errors across the whole corpus rather than averaging per-language
+scores — so the number to trust is a single three-language dev run of this exact lineup, not this
+table.
+
+The lineup is **mixed-architecture**, which is why `03_decode_and_submit.py` now carries a
+`WAXAL_BACKENDS="lin=waxalnet,sna=whisper,lug=waxalnet"` map and a per-language model loader.
+
+### Why the trailing period is per-language and not global
+
+`+period` is worth +0.0040 on lin and +0.0123 on lug, and **−0.0181 on sna**. Whisper punctuates
+natively, so appending produces `..` — one word error and one character error on a cell that was
+otherwise right. `WAXAL_PLUS_PERIOD="lin,lug"`. Re-derive this whenever a checkpoint changes.
+
+## The harness was lying, and this is why
+
+Before the bakeoff, dev-eval predicted **0.7392** for a configuration that scored **0.4919** on the
+leaderboard — a bias of **+0.2473**. That gap was not domain shift. It was **leakage**:
+
+`corpus_lines()` in `03_decode_and_submit.py` and `indomain()` in `00_build_lm_corpus.py` both read
+*all* of `Train.csv` to build the KenLM. `Train.csv` contains the `original_split == "validation"`
+rows, and those rows **are** the 900-clip dev set. The language model had memorised the dev
+references verbatim, and shallow fusion then decoded those same clips against it.
+`00_build_lm_corpus.py` was the worse of the two — `INDOMAIN_REPEAT` upweights that text.
+
+Fixed in both files, unconditionally rather than behind a flag: dev ids are dropped by id from the
+`Train.csv` path, and dev sentences are dropped by normalised content from the external corpus. If
+`devset.json` cannot be read the script says so loudly rather than silently rebuilding the leak.
+
+**Consequence: every α/β pair tuned before 2026-08-01 was tuned on leaked data and must be
+re-swept.** The bakeoff numbers above are clean because LM fusion was off entirely.
+
+### The remaining calibration check
+
+Our LM-free harness scores the organisers' `mms-300m-waxal-*` set at word-weighted **0.7453**. The
+leaderboard's top cluster is **0.7206–0.7257**. If the leaders are indeed running those
+checkpoints, the dev→leaderboard bias for an LM-free configuration is about **+0.02**, not +0.25 —
+which is the level of agreement a harness needs to be worth having. That inference rests on the
+assumption about what the leaders run; it should be confirmed by a real submission, not leaned on.
