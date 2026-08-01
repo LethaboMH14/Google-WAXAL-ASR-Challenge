@@ -1189,6 +1189,41 @@ if _off_set:
         known_lang.pop(i, None)
 
 unknown = [i for i in needed_ids if i in audio_store and i not in known_lang]
+
+# WAXAL_LANG_MAP overrides the LID model for clips that carry no language of their own.
+#
+# Why this exists. mms-lid-256 routes phase 2 to 94% Luganda. It does that with the
+# attention_mask correctly supplied, so the padding bug noted above is not the cause — the
+# model simply calls it that way, and its lug recall of exactly 1.000 on labelled audio is
+# the class-bias signature. The public leaderboard refutes the 94% claim outright: if phase 2
+# really were 94% Luganda then our submitted file, which decoded 87.8% Luganda, was already
+# routed nearly right, and inverting 0.4919 = a*s + (1-a)*f at a = 0.8367 puts its
+# perfect-routing CEILING at 0.5685 — below a score six other teams have posted on these same
+# clips. A ceiling cannot sit under an observed floor. See scripts/anchor_calibration.py.
+#
+# The surviving hypothesis is the CTC-confidence router (scripts + kaggle/kernels/router),
+# which is architecturally independent of the MMS LID family, has balanced per-class recalls
+# of 0.9525/0.9800/0.9650, and calls phase 2 lin 36.9 / sna 15.5 / lug 47.5. Its measured
+# agreement with the submitted file, 0.5680, matches the routing accuracy independently
+# implied by the leaderboard arithmetic (0.51-0.59). Two separate routes, one number.
+#
+# Routing and decoding are separable, so a map produced by one set of models is a legitimate
+# input to a decode by another. Ids absent from the map fall through to the LID as before.
+_map_path = os.environ.get("WAXAL_LANG_MAP", "")
+if unknown and _map_path and Path(_map_path).exists():
+    _ext = json.loads(Path(_map_path).read_text(encoding="utf-8"))
+    _bad = sorted({v for v in _ext.values() if v not in LANGS})
+    if _bad:
+        raise SystemExit(f"WAXAL_LANG_MAP names {_bad}, outside {LANGS} — those clips would be "
+                         f"dropped to BLANK_FILL. Fix the map.")
+    _hit = [i for i in unknown if i in _ext]
+    for i in _hit:
+        known_lang[i] = _ext[i]
+    print(f"WAXAL_LANG_MAP {Path(_map_path).name}: routed {len(_hit):,} / {len(unknown):,} "
+          f"unlabelled clip(s); {len(unknown) - len(_hit):,} fall through to {LID_MODEL}")
+    print("  map mix: " + str(dict(pd.Series([_ext[i] for i in _hit]).value_counts())))
+    unknown = [i for i in unknown if i not in _ext]
+
 if unknown:
     from transformers import AutoFeatureExtractor, Wav2Vec2ForSequenceClassification
     fe = AutoFeatureExtractor.from_pretrained(LID_MODEL)

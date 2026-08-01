@@ -143,6 +143,35 @@ env.update(
     WAXAL_RUN_TAG="lineup",
 )
 
+# ---- phase-2 routing -------------------------------------------------------
+# The 1,500 phase-2 ids carry no language, so something has to choose their decoder. Version 2
+# of this kernel let mms-lid-256 choose and it returned 94% Luganda. That is refuted by our own
+# leaderboard row: at that routing our submitted file was already ~right, and its perfect-routing
+# ceiling works out to 0.5685 — under a score six teams have posted on the same clips. A ceiling
+# cannot sit below an observed floor. Full arithmetic in scripts/anchor_calibration.py.
+#
+# So we route phase 2 with the CTC-confidence map from the waxal-router kernel instead:
+# architecturally independent of the MMS LID family, balanced recalls 0.9525/0.9800/0.9650, and
+# its agreement with our submitted file (0.5680) matches the routing accuracy the leaderboard
+# arithmetic implies independently (0.51-0.59).
+#
+# Hard-fail rather than fall through. A silent fall-through would quietly reproduce the 94%
+# Luganda file we already know scores ~0.49, and it would do it after an hour of GPU time.
+LANG_MAP = Path("/kaggle/input/waxal-router/lang_map_asr-conf_z_neg_entropy.json")
+if not LANG_MAP.exists():
+    found = sorted(p.name for p in Path("/kaggle/input").glob("*/lang_map*.json"))
+    raise SystemExit(
+        f"{LANG_MAP} is missing — add waxal-router to kernel_sources and re-push.\n"
+        f"  lang_map files visible under /kaggle/input: {found or 'none'}\n"
+        f"  Refusing to fall through to mms-lid-256: that path produces the 94%-Luganda\n"
+        f"  routing this kernel exists to replace, and it would cost an hour to find out.")
+env["WAXAL_LANG_MAP"] = str(LANG_MAP)
+
+_m = json.load(open(LANG_MAP))
+_mix = {k: sum(v == k for v in _m.values()) for k in ("lin", "sna", "lug")}
+print(f"phase-2 routing: {LANG_MAP.name}  n={len(_m):,}  "
+      + "  ".join(f"{k}={v:,} ({v / len(_m):.1%})" for k, v in _mix.items()))
+
 print(f"\n{'=' * 78}\n=== CONFIGURATION\n{'=' * 78}")
 for lg, (bk, mid, solo) in LINEUP.items():
     dot = "yes" if lg in PLUS_PERIOD.split(",") else "no"

@@ -11,6 +11,8 @@
   "machine_shape": "NvidiaTeslaT4",
   "dataset_sources": [],
   "competition_sources": [],
-  "kernel_sources": [],
+  "kernel_sources": [
+    "lethabomh14/waxal-router"
+  ],
   "model_sources": []
 }
