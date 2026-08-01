@@ -134,7 +134,11 @@ PHASE2_URL = "https://storage.googleapis.com/waxalphase2/audio.zip"
 # Preflight. The model does not load until after ~5 GB of phase-2 audio has downloaded and been
 # decoded, so a wrong or unattached checkpoint mount otherwise announces itself half an hour into
 # a GPU session. Check the inputs first — this costs a stat() call.
-if not CKPT.exists():
+#
+# Only the w2vbert backend needs a checkpoint; the default MMS backend pulls its weights from the
+# Hub. Read the env directly because BACKEND is defined in section 2, and this check has to run
+# before the download, not after it.
+if os.environ.get("WAXAL_BACKEND", "mms").lower() != "mms" and not CKPT.exists():
     raise SystemExit(
         f"\n  no fine-tuned checkpoint at {CKPT}"
         f"\n  mounts present: {[p.name for p in sorted(Path('/kaggle/input').glob('*'))] if Path('/kaggle/input').exists() else 'none'}"
@@ -302,19 +306,88 @@ for lang in LANGS:
 
 
 # ---------------------------------------------------------------- 2. model + decoders
-from transformers import Wav2Vec2BertForCTC, Wav2Vec2BertProcessor
+# BACKEND picks the acoustic model. It defaults to MMS because the w2v-bert fine-tune FAILED:
+# leg 1 collapsed to the CTC blank solution (WER and CER exactly 1.000 at every eval, train loss
+# flat at ~24.0 from step 400, grad_norm 167 -> 2). Evidence and post-mortem in
+# docs/sbu-lethabo-log.md, 1 Aug. Its CTC head was randomly initialised and WAXAL utterances are
+# long (176 chars / 26 words average), which is close to the worst case for bootstrapping a CTC
+# alignment — blank is a deep local minimum and it deepens with target length.
+#
+# mms-1b-all does not have that failure mode available to it: its per-language CTC heads are
+# already trained on lin/sna/lug, so we start from a model that transcribes rather than one that
+# has to discover an alignment from scratch. The KenLM fusion below — the single biggest lever we
+# have — never depended on the fine-tune at all. It needs logits, and MMS produces good ones now.
+#
+# "w2vbert" is kept working so the failed run stays reproducible for the rules' code review.
+BACKEND = os.environ.get("WAXAL_BACKEND", "mms").lower()
+ASR_MODEL = os.environ.get("WAXAL_ASR_MODEL", "facebook/mms-1b-all")
+MMS_ADAPTER = {"lin": "lin", "sna": "sna", "lug": "lug"}
+
 from pyctcdecode import build_ctcdecoder
 
-processor = Wav2Vec2BertProcessor.from_pretrained(CKPT)
-model = Wav2Vec2BertForCTC.from_pretrained(CKPT, torch_dtype=torch.float16).to(DEVICE).eval()
+if BACKEND == "mms":
+    from transformers import AutoProcessor, Wav2Vec2ForCTC
 
-vocab_dict = processor.tokenizer.get_vocab()
-sorted_vocab = [k for k, _ in sorted(vocab_dict.items(), key=lambda kv: kv[1])]
-# pyctcdecode's label convention: blank is "", the word delimiter is a literal space.
-labels = [("" if t == "[PAD]" else " " if t == "|" else t) for t in sorted_vocab]
+    processor = AutoProcessor.from_pretrained(ASR_MODEL)
+    model = Wav2Vec2ForCTC.from_pretrained(ASR_MODEL, torch_dtype=torch.float16).to(DEVICE).eval()
+    print(f"backend=mms  {ASR_MODEL}")
+else:
+    from transformers import Wav2Vec2BertForCTC, Wav2Vec2BertProcessor
+
+    processor = Wav2Vec2BertProcessor.from_pretrained(CKPT)
+    model = Wav2Vec2BertForCTC.from_pretrained(CKPT, torch_dtype=torch.float16).to(DEVICE).eval()
+    print(f"backend=w2vbert  {CKPT}")
+
+
+def _labels_from_tokenizer() -> list[str]:
+    """CTC label list in id order, in pyctcdecode's convention: blank is "", delimiter is " "."""
+    vocab_dict = processor.tokenizer.get_vocab()
+    # MMS's tokenizer holds one vocab per target language. Depending on the transformers version
+    # get_vocab() returns either the active language's flat dict or the whole nested mapping, so
+    # unwrap the nested case rather than trusting one shape.
+    if vocab_dict and all(isinstance(v, dict) for v in vocab_dict.values()):
+        active = getattr(processor.tokenizer, "target_lang", None)
+        vocab_dict = vocab_dict.get(active) or next(iter(vocab_dict.values()))
+    sorted_vocab = [k for k, _ in sorted(vocab_dict.items(), key=lambda kv: kv[1])]
+    # w2v-bert uses [PAD]; MMS uses <pad>. Both use | as the word delimiter.
+    return [("" if t in ("[PAD]", "<pad>") else " " if t == "|" else t) for t in sorted_vocab]
+
+
+_active_lang: str | None = None      # so we never re-swap an adapter we already hold
+labels = _labels_from_tokenizer()
+
+
+def set_language(lang: str) -> None:
+    """Point MMS at `lang`'s CTC adapter and rebuild the label list to match.
+
+    This is the one thing that genuinely differs from the w2v-bert path. w2v-bert had a single
+    shared 46-token vocab for all three languages, so `labels` could be built once at import.
+    MMS carries a SEPARATE vocabulary per adapter, so a decoder built against the wrong language's
+    labels silently maps logit indices onto the wrong characters — it does not raise, it just
+    produces convincing-looking rubbish. Hence: rebuild labels on every swap, and build any
+    decoder afterwards, never before.
+    """
+    global _active_lang, labels
+    if BACKEND != "mms" or lang == _active_lang:
+        return
+    adapter = MMS_ADAPTER.get(lang, lang)
+    try:
+        processor.tokenizer.set_target_lang(adapter)
+        model.load_adapter(adapter)
+    except Exception as e:                                  # noqa: BLE001
+        # LID can name a language mms-1b-all has no adapter for. Falling back to lug is stage 1's
+        # rule and the reasoning carries: everything LID confuses these clips with is Bantu, and
+        # lug is the nearest of our three. A wrong-but-related adapter still beats no output.
+        print(f"  no mms adapter for {lang} ({type(e).__name__}) -> decoding it as lug")
+        adapter = "lug"
+        processor.tokenizer.set_target_lang(adapter)
+        model.load_adapter(adapter)
+    labels = _labels_from_tokenizer()
+    _active_lang = lang
 
 
 def make_decoder(lang: str, alpha: float, beta: float):
+    set_language(lang)      # `labels` must belong to `lang` before the decoder captures it
     return build_ctcdecoder(
         labels,
         kenlm_model_path=lm_paths.get(lang),
@@ -325,9 +398,11 @@ def make_decoder(lang: str, alpha: float, beta: float):
 
 def logits_for(wavs: list[np.ndarray]) -> list[np.ndarray]:
     inp = processor(wavs, sampling_rate=16000, return_tensors="pt", padding=True)
+    # MMS is a raw-waveform wav2vec2 (input_values); w2v-bert takes precomputed mel features.
+    feats = inp.input_values if BACKEND == "mms" else inp.input_features
     with torch.inference_mode():
         out = model(
-            inp.input_features.to(DEVICE).half(),
+            feats.to(DEVICE).half(),
             attention_mask=inp.attention_mask.to(DEVICE),
         ).logits.float().cpu().numpy()
     lens = inp.attention_mask.sum(-1).cpu().numpy()
@@ -373,6 +448,9 @@ tuned = {}
 for lang, cfg in HF_CONFIGS.items():
     if lang not in lm_paths:
         continue
+    # BEFORE logits_for, not just before make_decoder: on MMS the adapter decides what the
+    # logits MEAN, so tuning alpha/beta against another language's adapter would tune on noise.
+    set_language(lang)
     ds = load_dataset("google/WaxalNLP", cfg, split="validation", streaming=True)
     ds = ds.cast_column("audio", Audio(sampling_rate=16000))
     wavs, refs = [], []
@@ -570,15 +648,35 @@ for lang in LANGS:
     t = tuned.get(lang)
     decoders[lang] = make_decoder(lang, t["alpha"], t["beta"]) if t and t["alpha"] is not None else None
 
+# Which languages do we actually have to decode? LANGS is the set we hold KenLMs for, but stage 1
+# routes OPEN-SET: on phase 2 its lang_map.json can name luo/nyn/xog/kam/kin, none of which are in
+# LANGS. Iterating LANGS alone silently skips those clips and hands them to BLANK_FILL — a
+# guaranteed total miss on every one, on the split that decides the prize.
+#
+# This is the "KNOWN GAP" flagged further up, and dropping w2v-bert is what closes it. That note
+# was right that a model fine-tuned on lin/sna/lug transcripts can never emit Dholuo; mms-1b-all
+# ships adapters for those languages, so each clip decodes in the language it is actually in.
+# There is no KenLM for them, so they decode greedily — worse than lin/sna/lug, vastly better
+# than a blank row.
+_routed = [l for l in dict.fromkeys(known_lang.get(i) for i in needed_ids) if l]
+DECODE_LANGS = LANGS + [l for l in _routed if l not in LANGS]
+if len(DECODE_LANGS) > len(LANGS):
+    print(f"\nopen-set routing sent clips to {DECODE_LANGS[len(LANGS):]} — decoding each with "
+          f"its own MMS adapter, greedily (no KenLM for those).")
+
 preds = {}
 with multiprocessing.get_context("fork").Pool(os.cpu_count()) as pool:
-    for lang in LANGS:
+    for lang in DECODE_LANGS:
         ids = [i for i in needed_ids if known_lang.get(i) == lang and i in audio_store]
         if not ids:
             continue
-        dec = decoders[lang]
+        # Re-arm the adapter for THIS language. `decoders` was built in a loop above, so the
+        # model is currently holding whichever language that loop finished on; without this the
+        # first language decoded here would run its audio through the last language's adapter.
+        set_language(lang)
+        dec = decoders.get(lang)      # .get: DECODE_LANGS extends past the keys built above
         print(f"\ndecoding {lang}: {len(ids):,} clips  "
-              f"({'beam+LM' if dec else 'greedy (LM lost the sweep)'})")
+              f"({'beam+LM' if dec else 'greedy' if lang in LANGS else 'greedy (no KenLM)'})")
         # Length-sorted so padded batches stay tight; roughly halves GPU time on skewed lengths.
         ids.sort(key=lambda i: len(audio_store[i]))
 
@@ -623,7 +721,9 @@ for fname, df, tid, ttxt in TEMPLATES:
     # substitution, the same N errors — but it means no cell reads back as NaN in a parser that
     # treats an empty field as missing. Same BLANK_FILL as stage 1, deliberately.
     sub[ttxt] = mapped.replace(r"^\s*$", BLANK_FILL, regex=True)
-    out = WORK / f"submission_03_w2vbert_lm_{SUFFIX.get(fname, Path(fname).stem)}.csv"
+    # Name the file after the backend that produced it. Hardcoding "w2vbert" here was fine when
+    # there was one backend; with two it is how the wrong CSV gets uploaded to Zindi.
+    out = WORK / f"submission_03_{BACKEND}_lm_{SUFFIX.get(fname, Path(fname).stem)}.csv"
     sub.to_csv(out, index=False)
 
     langs = pd.Series([known_lang.get(i, "??") for i in sub[tid].astype(str)]).value_counts()

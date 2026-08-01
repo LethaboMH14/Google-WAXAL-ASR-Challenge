@@ -131,6 +131,19 @@ env["CUDA_VISIBLE_DEVICES"] = "0"
 # 7.5 h against Kaggle's 9 h cap leaves room for setup, the closing eval, and the final save.
 env.setdefault("WAXAL_MAX_HOURS", "7.5")
 
+# !! DO NOT PUSH LEG 2. THIS KERNEL IS RETIRED. !!
+#
+# Leg 1 ran its full 7.5 h and collapsed to the CTC blank solution: WER and CER exactly 1.000 at
+# all four evals (steps 250/500/750/998), train loss flat at ~24.0 from step 400 while grad_norm
+# fell 167 -> 2. Every hypothesis decodes to the empty string. See docs/sbu-lethabo-log.md,
+# 1 Aug, for the evidence and the two artefact traps (the saved model is step 250, not 998).
+#
+# The annealing arithmetic below is CORRECT AND IRRELEVANT. A perfectly annealed LR schedule on a
+# model that emits only blanks still emits only blanks; resuming buys 7.5 h of flat line. We moved
+# to facebook/mms-1b-all, whose CTC heads for lin/sna/lug are pretrained rather than randomly
+# initialised, which makes this failure mode structurally impossible. Kept below unedited because
+# the reasoning is sound for any future run that actually trains.
+#
 # MAX_STEPS is now only the END of the LR schedule, not a promise about this session.
 #
 # LEG 2 MUST NOT INHERIT THIS 2,500. Measured on leg 1 from the interval between logging points:
