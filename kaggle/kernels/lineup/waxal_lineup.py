@@ -22,14 +22,46 @@ writes files, it does not talk to Zindi.
 THE CONFIGURATION, AND WHY EACH PIECE
 -------------------------------------
     lin  douyeszn/w2vbert-lin-waxal-aug-ft            0.7788   (mms-300m control: 0.6893)
-    sna  Mubarak127/waxal-whisper-large-v3-sna_asr    0.8034   (mms-300m control: 0.7815)
+    sna  waxal-benchmarking/mms-300m-waxal-sna        0.7815   (see PROVENANCE below)
     lug  waxal-benchmarking/mms-300m-waxal-lug        0.8163   (nothing in the bakeoff beat it)
 
-Mixed architecture — CTC for lin/lug, seq2seq for sna — which is why WAXAL_BACKENDS exists.
+PROVENANCE, 1 Aug — why sna is NOT the higher-scoring checkpoint
+----------------------------------------------------------------
+Mubarak127/waxal-whisper-large-v3-sna_asr measured 0.8034 on dev, 0.0219 better than the official
+benchmark model, and it is dropped anyway. Its card is unedited Trainer boilerplate: "fine-tuned
+version of Mubarak127/waxal-whisper-large-v3-sna_asr on an unknown dataset", "Training and
+evaluation data: More information needed", empty results table. Its declared base model is itself,
+so the chain never terminates at a public checkpoint. Created 2026-07-01, the day after the
+challenge data dropped.
 
-Trailing '.' on lin and lug only: worth +0.0040 and +0.0123 there, but -0.0181 on sna, because
-Whisper punctuates natively and appending gives '..' (one word error AND one character error on a
-cell that was otherwise correct).
+Three challenge rules bear on that, and it fails all three as an evidentiary matter:
+  - using the (public) Phase-1 test ground truth in a submission is a disqualifying breach;
+  - external data must be publicly accessible, legally licensed, and DISCLOSED in the final
+    solution documentation;
+  - top-10 finishers hand over code within 48 hours.
+We cannot disclose what we cannot establish. Nothing here says the author did anything wrong — the
+point is we have no way to show they didn't, and at code review the burden is ours.
+
+The swap costs 0.459*0 + 0.366*0.0219 + 0.175*0 = 0.0080 of final score. Correct price for a
+lineup we can account for end to end:
+  - douyeszn: card states "WAXAL train split only", speaker-disjoint validation, augmentation for
+    Phase-2 robustness, full training curve published. Exemplary, and its honest speaker-disjoint
+    number (0.7550 on the Zindi scale) is 0.0278 below what our dev split says — evidence our own
+    dev shares speakers with train and is therefore optimistic.
+  - waxal-benchmarking/*: the benchmark suite's own models, dataset tag waxal-benchmarking/waxal,
+    arXiv:2606.02375, published April 2026, before the challenge opened.
+
+All three are CTC now, so the mixed-architecture path is unused — WAXAL_BACKENDS is kept anyway so
+the seq2seq branch stays exercised and the swap is one env var to reverse.
+
+Trailing '.' now on ALL THREE, which is a consequence of the sna swap above, not a separate idea.
+It was worth +0.0040 on lin and +0.0123 on lug but -0.0181 on sna, because Whisper punctuates
+natively and appending gave '..' — one word error AND one character error on a cell that was
+otherwise correct. mms-300m-waxal-sna is CTC and its vocab is 51 symbols with no '.' in it (nor
+has lug's 38, nor douyeszn's 63), so it cannot produce the character at all, while 95.1% of Shona
+references end in one. The reason to exclude sna was Whisper-specific and left with Whisper.
+Expect roughly what lug got; the dev run re-measures all three, so the number is checked, not
+assumed.
 
 NO KENLM (WAXAL_NO_LM=1), and this is not laziness. Every alpha/beta pair we have was tuned on
 leaked data: corpus_lines() read all of Train.csv, which contains the original_split=="validation"
@@ -55,10 +87,10 @@ WORKING = Path("/kaggle/working")
 
 LINEUP = {
     "lin": ("waxalnet", "douyeszn/w2vbert-lin-waxal-aug-ft", 0.7788),
-    "sna": ("whisper", "Mubarak127/waxal-whisper-large-v3-sna_asr", 0.8034),
+    "sna": ("waxalnet", "waxal-benchmarking/mms-300m-waxal-sna", 0.7815),
     "lug": ("waxalnet", "waxal-benchmarking/mms-300m-waxal-lug", 0.8163),
 }
-PLUS_PERIOD = "lin,lug"                # measured per language; see the header
+PLUS_PERIOD = "lin,sna,lug"            # measured per language; see the header
 WORD_SHARE = {"lin": 0.459, "sna": 0.366, "lug": 0.175}   # share of dev reference WORDS
 LEADERBOARD_MMS = 0.491944347          # our one real observation, submitted 30 Jul
 TOP = 0.725666538                      # KanYi2026, rank 1 at the time of writing
