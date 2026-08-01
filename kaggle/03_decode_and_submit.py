@@ -63,10 +63,15 @@ if Path("/kaggle/working").exists():
     # and a way to silently work off a stale Train.csv. Prefer an attached Dataset if one is
     # there (that is how the earlier runs were wired), else fall back to the clone.
     _ds = Path("/kaggle/input/waxal-zindi")
+    # REPO is defined in BOTH branches, not only the local one — the dev harness in section 3b
+    # imports local/harness/score.py relative to it, and on Kaggle that import is the entire point
+    # of the run. (It was missing here once: the kernel loaded both models, then died on the very
+    # first line of dev mode with NameError, after the GPU was already warm.)
     try:
-        _repo_zindi = Path(__file__).resolve().parents[1] / "data" / "zindi"
+        REPO = Path(__file__).resolve().parents[1]
     except NameError:                                     # pasted into a notebook cell
-        _repo_zindi = Path.cwd() / "data" / "zindi"
+        REPO = Path.cwd()
+    _repo_zindi = REPO / "data" / "zindi"
     ZINDI_DIR = Path(os.environ["WAXAL_ZINDI_DIR"]) if os.environ.get("WAXAL_ZINDI_DIR") else (
         _ds if _ds.exists() else _repo_zindi)
     # Artefact names are NOT mount names on Kaggle. A kernel's output mounts at

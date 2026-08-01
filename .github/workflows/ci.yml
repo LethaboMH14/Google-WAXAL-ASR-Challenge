@@ -1,0 +1,42 @@
+# The cheapest possible guard against the most expensive failure mode in this repo.
+#
+# Kaggle kernels take 20-90 minutes and there is a daily GPU quota. A NameError in a branch that
+# only executes on Kaggle — say, a variable defined in the `local` arm of an if/else and used in a
+# block that only runs under WAXAL_DEV=1 — costs a whole session to discover, because the script
+# loads two multi-GB models before it reaches the bad line. That happened once. F821 catches it in
+# four seconds.
+#
+# Deliberately NOT a full lint: style noise on a competition repo under time pressure would just
+# get ignored, and a CI everyone ignores catches nothing. This checks correctness only.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: install
+        run: pip install ruff jiwer pandas numpy
+
+      # F821 undefined name, F811 redefinition, F402/F502... the real-bug subset.
+      # --isolated so a stray pyproject can't quietly disable these.
+      - name: undefined names
+        run: ruff check --isolated --select F821,F811,F401,F841 kaggle/ local/ scripts/
+
+      - name: syntax
+        run: python -m compileall -q kaggle/ local/ scripts/
+
+      # The metric is the one piece of code where being wrong is invisible: a subtly wrong scorer
+      # reports a great number for a bad submission and we would never know until the leaderboard
+      # disagreed. It is pure-python and runs in seconds, so it runs on every push.
+      - name: harness self-test
+        run: python local/harness/score.py --self-test

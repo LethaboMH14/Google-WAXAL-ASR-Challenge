@@ -26,7 +26,6 @@ import zipfile
 from collections import Counter
 from pathlib import Path
 
-import numpy as np
 import soundfile as sf
 import torch
 from transformers import AutoFeatureExtractor, Wav2Vec2ForSequenceClassification

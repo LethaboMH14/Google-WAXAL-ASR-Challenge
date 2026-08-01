@@ -207,3 +207,95 @@ def report(refs, hyps, langs, title: str = "", ci: bool = True) -> dict:
 def save(obj: dict, path: str | Path) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(obj, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------------------------
+# SELF-TEST
+#
+# This module decides which experiments are worth a submission. A scorer that is quietly wrong is
+# worse than no scorer at all: it reports a good number for a bad system, and we do not find out
+# until the leaderboard contradicts it days later with the submission already spent.
+#
+# So the properties that matter are asserted rather than assumed. Each case pins down one specific
+# claim about the organisers' metric as quoted in this file's docstring.
+def _self_test() -> int:
+    cases: list[bool] = []
+
+    def check(name: str, got: float, want: float, tol: float = 5e-4) -> None:
+        ok = abs(got - want) <= tol
+        cases.append(ok)
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name:46s} got={got:.4f} want={want:.4f}")
+
+    def check_lt(name: str, got: float, ceiling: float) -> None:
+        ok = got < ceiling
+        cases.append(ok)
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name:46s} got={got:.4f} want<{ceiling}")
+
+    refs = ["mbote na yo mokolo", "ndeipi shamwari yangu", "oli otya ssebo"]
+
+    # 1. Identity. Anything below 1.0 here means normalise() is mutating text it should not.
+    check("perfect transcription -> 1.0", score(refs, list(refs)).multi, 1.0)
+
+    # 2. The CTC blank-collapse failure mode. This must SCORE 0.0, not raise: an all-empty output
+    #    is exactly what our stage-2 fine-tune produced after 7.5 GPU-hours, and a harness that
+    #    crashes on it cannot tell us that is what happened.
+    check("empty hypotheses -> 0.0", score(refs, ["", "", ""]).multi, 0.0)
+
+    # 3. The metric lowercases, so case costs nothing.
+    check("uppercase is free", score(refs, [r.upper() for r in refs]).multi, 1.0)
+
+    # 4. Accents are NOT folded. This is why post-processing must never "helpfully" strip them.
+    check_lt("accents are NOT folded", score(["ekólo"], ["ekolo"]).multi, 1.0)
+
+    # 5. Punctuation IS counted — the punctuation thesis in one line. A perfect transcriber that
+    #    omits sentence marks does not score 1.0, and every top-cluster entry is paying this.
+    check_lt("punctuation is counted", score(["mbote, na yo."], ["mbote na yo"]).multi, 1.0)
+
+    # 6. jiwer POOLS, it does not average per utterance, so one long wrong sentence must outweigh
+    #    one short right one. If this ever flips to a mean, every language-weighting conclusion in
+    #    this repo — including reweight_to_test_mix — becomes invalid.
+    long_ref = " ".join(["nakei"] * 50)
+    pooled = score(["yo", long_ref], ["yo", " ".join(["x"] * 50)]).multi
+    averaged = 0.5 * (score(["yo"], ["yo"]).multi
+                      + score([long_ref], [" ".join(["x"] * 50)]).multi)
+    ok = pooled < averaged - 0.05
+    cases.append(ok)
+    print(f"  [{'PASS' if ok else 'FAIL'}] {'jiwer pools, does not average':46s} "
+          f"pooled={pooled:.4f} averaged={averaged:.4f}")
+
+    # 7. An empty REFERENCE is a broken dev set, not a scoreable case: WER divides by reference
+    #    length. Fail loudly rather than report a number nobody can interpret.
+    try:
+        score([""], ["anything"])
+        cases.append(False)
+        print(f"  [FAIL] {'empty reference must raise':46s} (it did not)")
+    except ValueError:
+        cases.append(True)
+        print(f"  [PASS] {'empty reference raises':46s}")
+
+    # 8. The inferred formula against our one real observation: the WER, CER and Multi Score that
+    #    Zindi reported for the zero-shot MMS submission. If this ever fails, the (1-x) inversion
+    #    in this file is wrong and every projection in this repo needs redoing.
+    check("multi = 0.5(1-WER) + 0.5(1-CER) vs leaderboard",
+          0.5 * (1 - 0.6448) + 0.5 * (1 - 0.3713), 0.491944347, tol=2e-3)
+
+    # 9. The test-mix reweighting must actually move the number toward the heavier language, not
+    #    silently return the pooled value.
+    per = score_by_language(["a b c", "d e f"], ["a b c", "x y z"], ["lin", "lug"])
+    rw = reweight_to_test_mix(per)
+    ok = 0.0 <= rw <= 1.0
+    cases.append(ok)
+    print(f"  [{'PASS' if ok else 'FAIL'}] {'reweight_to_test_mix in range':46s} got={rw:.4f}")
+
+    n_fail = sum(1 for c in cases if not c)
+    print(f"\n{len(cases) - n_fail}/{len(cases)} passed")
+    return 1 if n_fail else 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    if "--self-test" in sys.argv:
+        print("=== score.py self-test — pinning down the organisers' metric ===")
+        raise SystemExit(_self_test())
+    print(__doc__)
