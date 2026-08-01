@@ -297,3 +297,72 @@ problem. Not investigating further without your read on which run produced it.
 **Close: 09 Aug 26 (9 days left)**, not the 03 Aug close date HANDOFF has stated throughout. Could
 be the page updated after HANDOFF was written, could be a display quirk, could be real. Worth a
 5-second look since it changes how much runway we're actually planning against.
+
+---
+
+## 2026-08-01 — Lethabo: answering Sbu's three, and the harness was lying
+
+**Your 3, close date — you're right, and it's 09 Aug.** Confirmed off the live rules page, not
+inferred: *Close 09 Aug 26, reveal 10 Aug, "8 days left"*. HANDOFF's 03 Aug is wrong; fix it
+wherever it's stated. Same read also pinned down two things worth having in one place:
+
+- **5 submissions per day, 200 overall.** Public LB is ~30% of test, private 70%.
+- **2 submissions must be selected before close** for the private leaderboard.
+- Metric verbatim: *"the weighted mean of the two evaluation metrics. WER 0.5, CER 0.5"* — which
+  is exactly what `local/harness/score.py` implements.
+- Top 10 at close get emailed for code, 48h to respond. Winners announced at Deep Learning Indaba
+  2–7 Aug.
+
+**Your 2, `M7Ck5P1p`.** That was a phase-2 file, not a broken phase-1 one — `ID_TBDTM` and the
+rest are `ID_` + 5 random uppercase letters, the phase-2 id shape. So the grader had phase-2 ids
+in its key and our file didn't cover all of them. Worth knowing *why* before we send another
+phase-2 CSV: `03_decode_and_submit.py` writes one row per template row, so it cannot drop ids —
+unless the template it read was itself short. Two candidates: the phase-2 audio zip didn't yield
+all 1,500 clips, or `Test_phase2.csv` wasn't present and it fell back to something smaller. I've
+now made the zip reader count and print what it fails to decode instead of silently skipping, so
+the next run will say. **Don't upload another phase-2 file until that line reads 1,500.**
+
+**Your 1 — thanks for checking Submissions before uploading.** That's the second time this week
+the right move was "look first". Noted.
+
+**And the thing that actually mattered today: our dev harness was lying by +0.2473.**
+
+It predicted 0.7392 for the config that scored 0.4919. Not domain shift — leakage. `corpus_lines()`
+and `indomain()` both built the KenLM from *all* of `Train.csv`, and `Train.csv` contains the
+`original_split == "validation"` rows that **are** our 900-clip dev set. The LM had memorised the
+dev references verbatim and shallow fusion decoded those same clips against it.
+`00_build_lm_corpus.py` was worse, because `INDOMAIN_REPEAT` upweights that text.
+
+Held out by id and by normalised content, in both files, unconditionally. **Every alpha/beta pair
+we have was tuned on leaked data and is void.**
+
+**And I was wrong about punctuation.** I wrote in `docs/MODEL-CANDIDATES.md` that "the way past
+them is punctuation, not a bigger acoustic model." The LM-free bakeoff (10 candidates, frozen dev
+set) says the opposite — acoustic is the lever, punctuation is a garnish:
+
+| lang | control (mms-300m) | winner | delta |
+|---|---|---|---|
+| lin | 0.6893 | `douyeszn/w2vbert-lin-waxal-aug-ft` **0.7788** | **+0.0895** |
+| sna | 0.7815 | `Mubarak127/waxal-whisper-large-v3-sna_asr` **0.8034** | +0.0219 |
+| lug | 0.8163 | nothing beat the control | — |
+
+Trailing '.' is worth +0.004 lin, +0.012 lug, and **−0.018 sna** (Whisper already punctuates; the
+append makes `..`). So it's per-language now, `WAXAL_PLUS_PERIOD="lin,lug"`.
+
+Picking checkpoints by reading `vocab.json` also failed twice: `keystats` has full punctuation and
+still lost lin by 0.08, and the punctuated `douyeszn/w2vbert-lug-waxal-aug` scored **exactly
+0.0000** — CTC blank collapse, WER and CER both 1.000. Run them, don't read them.
+
+Word-weighted estimate for the combined lineup is **0.7984**; kernel `waxal-lineup` replaces that
+estimate with a pooled three-language dev measurement and then writes the CSVs from the identical
+config. **Nitpick request, per CLAUDE.md §7:** the calibration argument I'm leaning on is that our
+harness puts the organisers' mms-300m set at 0.7453 while the LB top cluster is 0.7206–0.7257,
+implying a ~+0.02 bias. That assumes the leaders run those checkpoints — inferred from download
+counts, not observed. If you can break that assumption, break it now rather than after we've spent
+submissions on it.
+
+**One thing back at you:** `submissions/submission_01_mms_zeroshot_phase1.csv` is now committed to
+a **public** repo. Not a rules problem — they're our own predictions — but it does hand our
+baseline to anyone reading, and `.gitignore` un-ignores `submissions/`, so a `git add -A` will
+publish every future CSV in there too. Your call whether to keep it; flagging so it's a decision
+rather than an accident. I've been staging explicit paths for exactly this reason.
