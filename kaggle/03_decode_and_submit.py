@@ -138,7 +138,8 @@ PHASE2_URL = "https://storage.googleapis.com/waxalphase2/audio.zip"
 # Only the w2vbert backend needs a checkpoint; the default MMS backend pulls its weights from the
 # Hub. Read the env directly because BACKEND is defined in section 2, and this check has to run
 # before the download, not after it.
-if os.environ.get("WAXAL_BACKEND", "mms").lower() != "mms" and not CKPT.exists():
+if (os.environ.get("WAXAL_BACKEND", "mms").lower() not in ("mms", "waxalnet")
+        and not CKPT.exists()):
     raise SystemExit(
         f"\n  no fine-tuned checkpoint at {CKPT}"
         f"\n  mounts present: {[p.name for p in sorted(Path('/kaggle/input').glob('*'))] if Path('/kaggle/input').exists() else 'none'}"
@@ -217,10 +218,20 @@ def guess_col(df, *cands):
 # Built into WORK, not the cwd. On Kaggle that's the same thing; on Lightning WORK is persistent,
 # so the cmake+make (several minutes, and on Lightning those minutes are billed against your 15
 # free credits) happens once ever instead of once per session.
+#
+# WAXAL_NO_LM=1 skips this whole section: no apt, no cmake, no corpus, no alpha/beta grid. That is
+# ~40 minutes of a GPU session, and for a dev run whose question is "how good is this acoustic
+# model on its own?" every one of those minutes buys nothing. Never set it for a submission run —
+# shallow fusion is the largest single lever in this pipeline.
+NO_LM = os.environ.get("WAXAL_NO_LM", "0") == "1"
+
 KENLM = WORK / "kenlm"
 LMPLZ = KENLM / "build" / "bin" / "lmplz"
 BUILD_BINARY = KENLM / "build" / "bin" / "build_binary"
-if not LMPLZ.exists():
+if NO_LM:
+    print("WAXAL_NO_LM=1 -> skipping KenLM build and alpha/beta tuning; decoding GREEDILY.")
+    os.system("pip -q install pyctcdecode")
+elif not LMPLZ.exists():
     # Kaggle runs as root and has no sudo; Lightning gives you a normal user with sudo. Try
     # plain apt first and fall back, rather than assuming either.
     apt = ("apt-get -qq install -y build-essential cmake libboost-system-dev libboost-thread-dev "
@@ -232,11 +243,12 @@ if not LMPLZ.exists():
               f"| tar xz -C {KENLM} --strip-components=1")
     os.system(f"mkdir -p {KENLM}/build && cd {KENLM}/build && cmake .. -DCMAKE_BUILD_TYPE=Release "
               "> /dev/null && make -j4 lmplz build_binary > /dev/null")
-assert LMPLZ.exists(), (
+assert NO_LM or LMPLZ.exists(), (
     f"KenLM did not build at {LMPLZ}. Without it there is no shallow fusion and no ~59% WER "
     f"win — stop and fix this rather than falling through to greedy decoding."
 )
-os.system("pip -q install pyctcdecode https://github.com/kpu/kenlm/archive/master.zip")
+if not NO_LM:
+    os.system("pip -q install pyctcdecode https://github.com/kpu/kenlm/archive/master.zip")
 
 LM_DIR = WORK / "lm"
 LM_DIR.mkdir(exist_ok=True)
@@ -266,7 +278,7 @@ def corpus_lines(lang: str) -> tuple[list[str], str]:
     return [l for l in lines if l], "Train.csv only (WEAK)"
 
 
-for lang in LANGS:
+for lang in [] if NO_LM else LANGS:
     lines, provenance = corpus_lines(lang)
     if not lines:
         print(f"  {lang}: no text at all, skipping LM — this language decodes greedily")
@@ -319,13 +331,59 @@ for lang in LANGS:
 # have — never depended on the fine-tune at all. It needs logits, and MMS produces good ones now.
 #
 # "w2vbert" is kept working so the failed run stays reproducible for the rules' code review.
+# "waxalnet" is the backend that matters. The WAXAL organisers published their own baseline
+# fine-tunes at huggingface.co/waxal-benchmarking — one model per language, trained on the WAXAL
+# corpus itself, ungated and Apache/MIT. The rules allow this explicitly: "You may use pretrained
+# models as long as they are openly available to everyone."
+#
+# Their published test numbers, projected onto this competition's metric (weighted by each
+# language's share of reference words/characters, because jiwer POOLS rather than averages):
+#
+#     mms-300m-waxal-*     WER 0.317  CER 0.096  ->  multi 0.794
+#     whisper-small-waxal-* WER 0.332  CER 0.113  ->  multi 0.777
+#     zero-shot mms-1b-all (what we submitted)    ->  multi 0.492  (measured, rank 120)
+#
+# Those projections assume punctuation is reproduced. It is not: their vocabs carry only '&' and
+# '/', no '.' ',' or apostrophe. Docking the measured cost of emitting no punctuation puts
+# mms-300m-waxal-* at ~0.731 — which is the leaderboard's entire top cluster (0.7206-0.7257).
+# That is almost certainly what the leaders are running, and it says the way past them is
+# punctuation, not a bigger acoustic model. See local/harness/ for how all of this was measured.
 BACKEND = os.environ.get("WAXAL_BACKEND", "mms").lower()
 ASR_MODEL = os.environ.get("WAXAL_ASR_MODEL", "facebook/mms-1b-all")
 MMS_ADAPTER = {"lin": "lin", "sna": "sna", "lug": "lug"}
 
+# One checkpoint per language, not one model with adapters — so these swap as whole models.
+WAXALNET = {
+    "lin": os.environ.get("WAXAL_LIN", "waxal-benchmarking/mms-300m-waxal-lin"),
+    "sna": os.environ.get("WAXAL_SNA", "waxal-benchmarking/mms-300m-waxal-sna"),
+    "lug": os.environ.get("WAXAL_LUG", "waxal-benchmarking/mms-300m-waxal-lug"),
+}
+
 from pyctcdecode import build_ctcdecoder
 
-if BACKEND == "mms":
+if BACKEND == "waxalnet":
+    from transformers import AutoProcessor, Wav2Vec2ForCTC
+
+    _wn_cache: dict[str, tuple] = {}
+
+    def _wn_load(lang: str):
+        """Load (and cache) one language's WAXALNet checkpoint.
+
+        Cached rather than reloaded because the decode loop groups by language but the phase-2
+        LID pass can interleave them; three mms-300m in fp16 is ~1.9 GB, which a T4 holds
+        comfortably next to the beam search.
+        """
+        if lang not in _wn_cache:
+            repo = WAXALNET.get(lang) or WAXALNET["lug"]
+            print(f"  loading {lang}: {repo}", flush=True)
+            pr = AutoProcessor.from_pretrained(repo)
+            md = Wav2Vec2ForCTC.from_pretrained(repo, torch_dtype=torch.float16).to(DEVICE).eval()
+            _wn_cache[lang] = (pr, md)
+        return _wn_cache[lang]
+
+    processor, model = _wn_load("lin")
+    print(f"backend=waxalnet  { {k: v.split('/')[-1] for k, v in WAXALNET.items()} }")
+elif BACKEND == "mms":
     from transformers import AutoProcessor, Wav2Vec2ForCTC
 
     processor = AutoProcessor.from_pretrained(ASR_MODEL)
@@ -399,8 +457,18 @@ def set_language(lang: str) -> None:
     produces convincing-looking rubbish. Hence: rebuild labels on every swap, and build any
     decoder afterwards, never before.
     """
-    global _active_lang, labels
-    if BACKEND != "mms" or lang == _active_lang:
+    global _active_lang, labels, processor, model
+    if lang == _active_lang:
+        return
+    if BACKEND == "waxalnet":
+        # Whole-model swap, not an adapter swap. Each WAXALNet checkpoint carries its OWN vocab
+        # (lin 72 tokens, sna 51, lug 38 — measured), so `labels` must be rebuilt from the new
+        # processor before any decoder is constructed, for exactly the reason documented below.
+        processor, model = _wn_load(lang if lang in WAXALNET else "lug")
+        labels = _labels_from_tokenizer()
+        _active_lang = lang
+        return
+    if BACKEND != "mms":
         return
     adapter = MMS_ADAPTER.get(lang, lang)
     try:
@@ -430,8 +498,8 @@ def make_decoder(lang: str, alpha: float, beta: float):
 
 def logits_for(wavs: list[np.ndarray]) -> list[np.ndarray]:
     inp = processor(wavs, sampling_rate=16000, return_tensors="pt", padding=True)
-    # MMS is a raw-waveform wav2vec2 (input_values); w2v-bert takes precomputed mel features.
-    feats = inp.input_values if BACKEND == "mms" else inp.input_features
+    # MMS and WAXALNet are raw-waveform wav2vec2 (input_values); w2v-bert takes mel features.
+    feats = inp.input_values if BACKEND in ("mms", "waxalnet") else inp.input_features
     with torch.inference_mode():
         out = model(
             feats.to(DEVICE).half(),
@@ -538,6 +606,118 @@ for lang, cfg in HF_CONFIGS.items():
     gc.collect()
 
 json.dump(tuned, open(WORK / "lm_tuning.json", "w"), indent=2)
+
+
+# ---------------------------------------------------------------- 3b. DEV MODE (WAXAL_DEV=1)
+# Simulate a submission and predict its leaderboard score, without spending a submission.
+#
+# This runs the SAME model, the SAME set_language(), the SAME decoders and the SAME normalise()
+# that section 6 uses to build the real file — it only swaps what audio goes in and scores the
+# result instead of writing a csv. A harness that re-implements the decode measures a different
+# system than the one we upload, which is worse than no harness at all.
+#
+# The references come from local/harness/devset.json: a seeded sample of Train.csv rows marked
+# original_split == "validation". That is the organisers' own held-out split, handed to us
+# labelled. It is NOT the phase-1 test labels, which the rules forbid using and which we never
+# read. See local/harness/make_devset.py for why it is sampled to the test set's language mix.
+if os.environ.get("WAXAL_DEV", "0") == "1":
+    import multiprocessing as _mp
+
+    sys.path.insert(0, str(REPO / "local" / "harness"))
+    import score as HARNESS                                   # noqa: E402
+
+    dev = json.load(open(REPO / "local" / "harness" / "devset.json", encoding="utf-8"))
+    dev_items = dev["items"]
+    want = {it["id"]: it for it in dev_items}
+    print(f"\n=== DEV MODE === {len(want):,} clips, seed {dev['seed']}, mix {dev['actual_mix']}")
+
+    # Cached to WORK because the dev set is FROZEN — the same 900 clips every run, forever. The
+    # streaming pull is minutes; the load is seconds. Comparing two backends in one GPU session
+    # should not cost the download twice, and more importantly both backends must see byte-identical
+    # audio or the comparison measures the decoder plus the resampler.
+    dev_cache = WORK / f"dev_audio_{dev['seed']}_{dev['n']}.npz"
+    dev_audio = {}
+    if dev_cache.exists():
+        with np.load(dev_cache) as z:
+            dev_audio = {k: z[k] for k in z.files}
+        print(f"dev audio from cache: {len(dev_audio):,} clips ({dev_cache.name})")
+    else:
+        for lang, cfg in HF_CONFIGS.items():
+            need = {i for i, it in want.items() if it["language"] == lang}
+            if not need:
+                continue
+            ds = load_dataset("google/WaxalNLP", cfg, split="validation", streaming=True)
+            ds = ds.cast_column("audio", Audio(sampling_rate=16000))
+            got = 0
+            for row in ds:
+                rid = str(row["id"])
+                if rid in need and rid not in dev_audio:
+                    dev_audio[rid] = decode_audio_cell(row["audio"])
+                    got += 1
+                    if got % 100 == 0:
+                        print(f"  {lang} audio {got:,}/{len(need):,}", flush=True)
+                if got >= len(need):
+                    break
+        np.savez(dev_cache, **dev_audio)
+        print(f"resolved {len(dev_audio):,}/{len(want):,} dev clips -> cached {dev_cache.name}")
+
+    dev_dec = {}
+    for lang in LANGS:
+        t = tuned.get(lang)
+        dev_dec[lang] = make_decoder(lang, t["alpha"], t["beta"]) \
+            if t and t["alpha"] is not None else None
+
+    dev_pred = {}
+    with _mp.get_context("fork").Pool(os.cpu_count()) as pool:
+        for lang in LANGS:
+            ids = [i for i in want if want[i]["language"] == lang and i in dev_audio]
+            if not ids:
+                continue
+            set_language(lang)
+            dec = dev_dec.get(lang)
+            print(f"\ndecoding dev/{lang}: {len(ids):,} clips ({'beam+LM' if dec else 'greedy'})")
+            ids.sort(key=lambda i: len(dev_audio[i]))
+            bi, bl = [], []
+
+            def _flush():
+                if not bi:
+                    return
+                txt = (dec.decode_batch(pool, bl, beam_width=BEAM_WIDTH) if dec
+                       else [processor.tokenizer.decode(l.argmax(-1)) for l in bl])
+                for i, t_ in zip(bi, txt):
+                    dev_pred[i] = normalise(t_)
+                bi.clear()
+                bl.clear()
+
+            for k in range(0, len(ids), 4):
+                ch = ids[k:k + 4]
+                bl.extend(logits_for([dev_audio[i][:16000 * MAX_SECONDS] for i in ch]))
+                bi.extend(ch)
+                if len(bi) >= 64:
+                    _flush()
+            _flush()
+
+    ok = [i for i in want if i in dev_pred]
+    refs = [want[i]["reference"] for i in ok]
+    hyps = [dev_pred[i] for i in ok]
+    lgs = [want[i]["language"] for i in ok]
+    res = HARNESS.report(refs, hyps, lgs, title=f"DEV — backend={BACKEND}")
+
+    # The single most valuable extra number here: what a trailing full stop is worth. These CTC
+    # vocabs emit no sentence punctuation at all, and on the dev references '.' alone accounts for
+    # 65 marks per 1,000 reference words. Measured, not assumed — if it does not help, we see that.
+    res["plus_period"] = HARNESS.score(refs, [h + "." if h.strip() else h for h in hyps]).multi
+    print(f"  + trailing '.' on every hypothesis -> multi={res['plus_period']:.4f} "
+          f"(delta {res['plus_period'] - res['per_language']['overall']['multi']:+.4f})")
+
+    res["backend"] = BACKEND
+    res["models"] = WAXALNET if BACKEND == "waxalnet" else ASR_MODEL
+    res["n_decoded"] = len(ok)
+    HARNESS.save(res, WORK / f"dev_result_{BACKEND}.json")
+    json.dump({i: dev_pred[i] for i in ok}, open(WORK / f"dev_preds_{BACKEND}.json", "w"),
+              ensure_ascii=False, indent=1)
+    print(f"\nwrote {WORK / f'dev_result_{BACKEND}.json'}")
+    raise SystemExit(0)
 
 
 # ---------------------------------------------------------------- 4. resolve test audio
