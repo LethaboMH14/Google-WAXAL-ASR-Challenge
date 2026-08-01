@@ -60,8 +60,8 @@ SEED 1337, argmax everywhere, no sampling: rerunning reproduces the routing exac
 
 import io
 import json
-import re
 import os
+import re
 import subprocess
 import sys
 import zipfile
