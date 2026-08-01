@@ -36,10 +36,13 @@ A CTC model's per-frame confidence is a direct answer to "does this audio explai
 language's phone and character inventory". Run all three and take the most confident. That is the
 `asr-conf` router below, and it costs three cheap forward passes per clip.
 
-Second, independent candidate: Whisper's own language head. whisper-large-v3 carries <|ln|>,
-<|sn|> and <|lg|> in its token space, so one decoder step over the encoder output gives a
-posterior over exactly our three languages from a completely different model family and different
-training data than mms-lid. Different failure modes are what makes a vote worth taking.
+Second, independent candidate: Whisper's own language head. One decoder step over the encoder
+output gives a posterior over language tokens from a completely different model family and
+different training data than mms-lid, and different failure modes are what makes a vote worth
+taking. Note the limit, verified before this ran: whisper-large-v3 carries <|ln|> and <|sn|> but
+NOT <|lg|> — convert_tokens_to_ids returns unk_token_id for it. So Whisper is a Lingala/Shona
+discriminator, worth keeping because those two are 82.5% of the metric's words, and it abstains
+rather than votes whenever the question is about Luganda.
 
 WHAT IS MEASURED, ON WHAT, AND WHY IT IS COMPARABLE
 ---------------------------------------------------
@@ -57,6 +60,7 @@ SEED 1337, argmax everywhere, no sampling: rerunning reproduces the routing exac
 
 import io
 import json
+import re
 import os
 import subprocess
 import sys
@@ -231,12 +235,36 @@ for lang, mid in ROUTER_ASR.items():
     print(f"\nscoring every clip under {lang} ({mid})", flush=True)
     conf[lang] = ctc_confidence(mid, ALL)
 
-RULES = ["mean_lp", "mean_lp_nb", "neg_entropy"]
+BASE_RULES = ["mean_lp", "mean_lp_nb", "neg_entropy"]
 asr_routes: dict[str, dict[str, str]] = {}
-for rule in RULES:
-    asr_routes[rule] = {
-        i: max(LANGS, key=lambda lg: conf[lg][i][rule]) for i in ALL
-    }
+for rule in BASE_RULES:
+    asr_routes[rule] = {i: max(LANGS, key=lambda lg: conf[lg][i][rule]) for i in ALL}
+
+# Z-NORMALISED VARIANTS, and this is not a flourish. The three vocabularies are 74 / 53 / 40
+# tokens (verified from their config.json), so the models are not competing on level terms: with
+# 40 classes it is mechanically easier to concentrate probability mass on one of them than with
+# 74, and both mean_lp and neg_entropy inherit that bias — max entropy alone is log V. A raw
+# argmax across the three would partly be measuring vocabulary size and would tilt toward Luganda.
+#
+# Z-scoring each model's scores over the whole corpus removes any constant per-model offset,
+# whatever its cause — vocab size, calibration temperature, fine-tuning duration — and changes the
+# question from "which model likes this clip most" to "which model likes this clip most relative to
+# how it treats audio in general". It uses no labels, so it is legitimate on the unlabelled phase-2
+# clips too; it does assume the corpus is a mix rather than one language, which it is.
+_ids = list(ALL)
+zconf: dict[str, dict[str, dict[str, float]]] = {lg: {} for lg in LANGS}
+for rule in BASE_RULES:
+    for lg in LANGS:
+        v = np.array([conf[lg][i][rule] for i in _ids], dtype=np.float64)
+        mu, sd = float(v.mean()), float(v.std())
+        if sd < 1e-9:                       # a constant score carries no information
+            print(f"  WARNING: {lg}/{rule} has zero variance across the corpus — z is undefined, "
+                  f"leaving it unnormalised")
+            sd = 1.0
+        for i, x in zip(_ids, (v - mu) / sd):
+            zconf[lg].setdefault(i, {})[rule] = float(x)
+    asr_routes[f"z:{rule}"] = {i: max(LANGS, key=lambda lg: zconf[lg][i][rule]) for i in ALL}
+RULES = BASE_RULES + [f"z:{r}" for r in BASE_RULES]
 
 
 # ------------------------------------------------------------------ 4. router B: Whisper's LID head
@@ -251,16 +279,27 @@ def whisper_lid(clips: dict[str, np.ndarray], bs: int = 8) -> dict[str, str]:
     pr = WhisperProcessor.from_pretrained(WHISPER_LID)
     md = WhisperForConditionalGeneration.from_pretrained(
         WHISPER_LID, torch_dtype=torch.float16).to(DEVICE).eval()
+    # The guard has to test against unk, not against None. Verified locally on whisper-large-v3:
+    #   <|ln|> -> 50353   <|sn|> -> 50324   <|lg|> -> 50257 == unk_token_id
+    # Whisper covers Lingala and Shona but NOT Luganda, and convert_tokens_to_ids answers with unk
+    # rather than None, so a `if t is None` check passes happily and the argmax then runs over
+    # <|ln|>, <|sn|> and <|unk|> — a router with a garbage third class. Test for unk.
+    unk = pr.tokenizer.unk_token_id
     tok_ids, keep = [], []
     for code, lg in WHISPER_CODE.items():
         t = pr.tokenizer.convert_tokens_to_ids(f"<|{code}|>")
-        if t is None or t < 0:
-            print(f"  <|{code}|> not in this tokenizer — dropping {lg} from whisper-lid")
+        if t is None or t < 0 or t == unk:
+            print(f"  <|{code}|> is not in this tokenizer (got {t!r}, unk={unk}) — "
+                  f"whisper-lid cannot answer {lg}")
             continue
         tok_ids.append(t)
         keep.append(lg)
     if len(keep) < 2:
         raise SystemExit("whisper-lid: fewer than two language tokens resolved")
+    if set(keep) != set(LANGS):
+        print(f"  whisper-lid is a {'/'.join(keep)} discriminator only. It is kept because those "
+              f"two carry 82.5% of the metric's words, but it can never return the missing "
+              f"language, so it must ABSTAIN rather than vote when the question is about one.")
     sot = md.config.decoder_start_token_id
 
     ids, out = list(clips), {}
@@ -306,8 +345,10 @@ def report(name: str, route: dict[str, str]) -> float:
         mix = Counter(ph2.values())
         tot = sum(mix.values())
         drift = sum(abs(mix.get(lg, 0) / tot - PHASE1_MIX[lg]) for lg in LANGS) / 2
-        print(f"    phase-2 mix: " + "  ".join(f"{lg} {mix.get(lg, 0) / tot:.1%}" for lg in LANGS)
-              + f"   (phase-1 truth lin 43.9% / sna 41.1% / lug 15.0%; total variation {drift:.3f})")
+        print("    phase-2 mix: "
+              + "  ".join(f"{lg} {mix.get(lg, 0) / tot:.1%}" for lg in LANGS)
+              + f"   (phase-1 truth lin 43.9% / sna 41.1% / lug 15.0%; "
+              f"total variation {drift:.3f})")
     # What this routing is worth, if a correct clip scores ORACLE and a misroute scores ~0.30.
     print(f"    projected score at this accuracy: {acc * ORACLE + (1 - acc) * 0.30:.4f}"
           f"   (we are at {LB:.4f})")
@@ -319,16 +360,33 @@ cands: dict[str, dict[str, str]] = {f"asr-conf[{r}]": asr_routes[r] for r in RUL
 if wroute:
     cands["whisper-lid"] = wroute
 
-# A vote across independent families. Ties fall back to the ASR confidence, because that is the
-# only member trained on this corpus — the tie-break should favour the better-informed voter.
+# A vote across independent families. Two things it must get right:
+#
+# 1. The ASR base rule is chosen by MEASURED accuracy on the labelled clips, not picked in advance.
+#    Which confidence statistic discriminates best is an empirical question and we have the labels
+#    to answer it, so answering it beats asserting it.
+# 2. Whisper ABSTAINS on any language it cannot name. whisper-large-v3 has no <|lg|>, so on a clip
+#    the ASR router calls Luganda, Whisper's "lin" is not a dissenting opinion — it is the only
+#    thing Whisper is able to say. Counting it as a vote would let a model systematically overrule
+#    the one language it is blind to, which is worse than not consulting it at all.
 if wroute:
-    base = asr_routes["mean_lp_nb"]
-    vote = {}
+    _acc_of = lambda r: sum(1 for i, t in truth.items() if r.get(i) == t) / max(1, len(truth))
+    _ranked = sorted(RULES, key=lambda r: _acc_of(asr_routes[r]), reverse=True)
+    first, second = asr_routes[_ranked[0]], asr_routes[_ranked[1]]
+    covered = set(wroute.values())
+    print(f"\n  vote: ASR rules {_ranked[0]} + {_ranked[1]} (best two by measured accuracy), "
+          f"whisper voting only on {sorted(covered)}")
+    vote, abstained = {}, 0
     for i in ALL:
-        c = Counter([base[i], asr_routes["neg_entropy"][i], wroute.get(i, base[i])])
-        best, n = c.most_common(1)[0]
-        vote[i] = best if n >= 2 else base[i]
-    cands["vote(asr x2 + whisper)"] = vote
+        voters = [first[i], second[i]]
+        if first[i] in covered and i in wroute:
+            voters.append(wroute[i])
+        else:
+            abstained += 1
+        best_, n = Counter(voters).most_common(1)[0]
+        vote[i] = best_ if n >= 2 else first[i]   # ties go to the best-measured single rule
+    print(f"  whisper abstained on {abstained:,} / {len(ALL):,} clips")
+    cands[f"vote({_ranked[0]} + {_ranked[1]} + whisper)"] = vote
 
 scores = {n: report(n, r) for n, r in cands.items()}
 
@@ -339,14 +397,15 @@ print(f"  best router: {best}   accuracy {ba:.4f}")
 print(f"  the shipped open-set mms-lid routing implied ~0.43-0.66 accuracy (0.4919 observed)")
 print(f"  at {ba:.4f}, the SAME mms-300m trio projects ~{ba * ORACLE + (1 - ba) * 0.30:.4f};")
 print(f"  the bakeoff lineup (0.7984 oracle) projects ~{ba * 0.7984 + (1 - ba) * 0.30:.4f}")
-print("\n  CAVEATS, plainly: accuracy is measured on phase-1 TEST audio and phase 2 is described as")
-print("  new recordings, so this is an upper bound. The 0.30 misroute figure is an estimate, not a")
-print("  measurement — it comes from solving the 0.4919 observation, not from scoring misrouted")
-print("  clips directly. The ranking between routers does not depend on it; the projection does.")
+print("\n  CAVEATS, plainly: accuracy is measured on phase-1 TEST audio, and phase 2 is described")
+print("  as new recordings, so this is an upper bound. The 0.30 misroute figure is an")
+print("  estimate, not a measurement — it comes from solving the 0.4919 observation rather than")
+print("  from scoring misrouted clips, which is what WAXAL_MISROUTE=1 on stage 3 now fixes. The")
+print("  RANKING between routers does not depend on that figure; only the projection does.")
 
 # ------------------------------------------------------------------ 6. hand the routing to stage 3
 for name, route in cands.items():
-    slug = name.replace("[", "_").replace("]", "").replace(" ", "").replace("(", "").replace(")", "")
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", name).strip("_")
     json.dump({i: route[i] for i in phase2 if i in route},
               open(WORKING / f"lang_map_{slug}.json", "w"), indent=1)
 json.dump({i: cands[best][i] for i in phase2 if i in cands[best]},
