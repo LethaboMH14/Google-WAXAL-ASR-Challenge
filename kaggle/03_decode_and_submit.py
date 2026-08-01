@@ -153,6 +153,7 @@ LANGS = ["lin", "sna", "lug"]
 HF_CONFIGS = {"lin": "lin_asr", "sna": "sna_asr", "lug": "lug_asr"}
 LID_MODEL = "facebook/mms-lid-256"
 NGRAM_ORDER = 5
+BLANK_FILL = "a"                  # what to write when the decoder returns nothing; see §5
 MAX_SECONDS = 40
 SEED = 1337
 # 100 is the pyctcdecode default and the usual sweet spot; past ~250 the gain is noise and the
@@ -169,8 +170,16 @@ LOWERCASE = True
 KEEP_PUNCT = set(".,'’-;:!?")
 
 
+# Train.csv is 17,063 ASCII U+0027 and zero curly variants, so ' is the only apostrophe in the
+# stage 2 vocab. Fold every lookalike onto it: on a character metric an unfolded U+2019 is a
+# guaranteed wrong character in every word carrying one, and it costs nothing if the scorer
+# already normalises. See the longer note in 00_build_lm_corpus.py for what it costs the LM.
+APOSTROPHES = {"’": "'", "ʼ": "'", "‘": "'", "´": "'", "`": "'"}
+
+
 def normalise(text: str) -> str:
     text = unicodedata.normalize("NFC", str(text)).strip()
+    text = text.translate(str.maketrans(APOSTROPHES))
     if LOWERCASE:
         text = text.lower()
     text = "".join(c if (c.isalpha() or c.isspace() or c in KEEP_PUNCT) else " " for c in text)
@@ -234,7 +243,13 @@ def corpus_lines(lang: str) -> tuple[list[str], str]:
     """External corpus from stage 0 if it is mounted, else the thin Train.csv fallback."""
     ext = LM_CORPUS_DIR / f"{lang}.txt"
     if ext.exists():
-        lines = [l for l in ext.read_text(encoding="utf-8").splitlines() if l.strip()]
+        # Fold apostrophes here too. Stage 0 does it at write time, but a corpus built before
+        # that fix existed is still a valid mount, and a KenLM carrying a character the acoustic
+        # model cannot emit makes those words unreachable in the beam. Cheap insurance: this is
+        # a str.translate over text we are reading anyway, not a re-normalisation.
+        _fold = str.maketrans(APOSTROPHES)
+        lines = [l.translate(_fold)
+                 for l in ext.read_text(encoding="utf-8").splitlines() if l.strip()]
         if lines:
             return lines, "external (stage 0)"
 
@@ -599,16 +614,24 @@ with multiprocessing.get_context("fork").Pool(os.cpu_count()) as pool:
 SUFFIX = {"SampleSubmission.csv": "phase1", "Test_phase2.csv": "phase2"}
 for fname, df, tid, ttxt in TEMPLATES:
     sub = df.copy()
-    sub[ttxt] = sub[tid].astype(str).map(preds).fillna("")
+    # Count the misses BEFORE filling, or the diagnostic below reports zero and we lose the one
+    # signal that says the audio for those ids never arrived.
+    mapped = sub[tid].astype(str).map(preds).fillna("")
+    blank = int((mapped.str.strip() == "").sum())
+    # Fill with a single character rather than leaving the cell empty. Metric-neutral — an empty
+    # hypothesis against an N-word reference is N deletions, and "a" is N-1 deletions plus one
+    # substitution, the same N errors — but it means no cell reads back as NaN in a parser that
+    # treats an empty field as missing. Same BLANK_FILL as stage 1, deliberately.
+    sub[ttxt] = mapped.replace(r"^\s*$", BLANK_FILL, regex=True)
     out = WORK / f"submission_03_w2vbert_lm_{SUFFIX.get(fname, Path(fname).stem)}.csv"
     sub.to_csv(out, index=False)
 
-    blank = int((sub[ttxt].str.strip() == "").sum())
     langs = pd.Series([known_lang.get(i, "??") for i in sub[tid].astype(str)]).value_counts()
     print(f"\nwrote {out}")
     print(f"  rows={len(sub):,}  blank={blank:,} ({100*blank/len(sub):.1f}%)")
     print(f"  language mix: {langs.to_dict()}")
     if blank:
         # On phase 2 this almost always means the audio zip did not contain that id.
-        print(f"  WARNING: {blank:,} ids got no prediction and will score as pure deletions.")
+        print(f"  WARNING: {blank:,} ids got no prediction. They carry BLANK_FILL and score as a "
+              f"total miss on those rows — the fill is cosmetic, it does not recover anything.")
     print(sub.head(5).to_string())

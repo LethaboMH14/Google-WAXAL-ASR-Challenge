@@ -177,8 +177,23 @@ SOURCES: dict[str, list[dict]] = {
 
 
 # ---------------------------------------------------------------- normalisation
+# Measured on Train.csv (38,199 rows): 17,063 ASCII U+0027 and ZERO of any curly variant. So the
+# stage 2 CTC vocab contains ' and nothing else apostrophe-like — while scraped web text is full
+# of U+2019. Without this fold that mismatch costs us twice, silently, in the direction of the
+# biggest lever we have:
+#   - acceptable() rejects a line once >2% of its characters are outside CHARSET, and one curly
+#     apostrophe in a short sentence is already ~1.5-3%. Whole sentences vanish from the corpus.
+#   - the lines that DO survive keep a character the acoustic model cannot emit, so pyctcdecode
+#     can never match those words and their probability mass is wasted.
+# It matters most exactly where we need it most: Luganda's ng' digraph puts an apostrophe inside
+# very common words. Folding is free — U+2019 does not occur in the in-domain text at all, so
+# nothing in-domain changes.
+APOSTROPHES = {"’": "'", "ʼ": "'", "‘": "'", "´": "'", "`": "'"}
+
+
 def normalise(text: str) -> str:
     text = unicodedata.normalize("NFC", str(text)).strip()
+    text = text.translate(str.maketrans(APOSTROPHES))
     if LOWERCASE:
         text = text.lower()
     text = "".join(c if (c.isalpha() or c.isspace() or c in KEEP_PUNCT) else " " for c in text)
