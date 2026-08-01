@@ -339,18 +339,50 @@ else:
     print(f"backend=w2vbert  {CKPT}")
 
 
+# Tokens that must never reach a transcript. MMS's vocab carries <s>, </s> and <unk> alongside
+# the characters, and pyctcdecode does NOT strip them the way tokenizer.decode() does — it warns
+# ("Found entries of length > 1 in alphabet") and then emits them literally. Verified locally on
+# the real lug vocab: a decode came back as 'a<s>b?</s>a1j...'. Every one of those is straight
+# WER and CER damage on a metric that is half CER.
+#
+# They cannot simply be mapped to "" because pyctcdecode rejects duplicate labels (only one entry
+# may be the blank). So they keep unique placeholder labels here and are masked out of the LOGITS
+# in logits_for(), which is the more robust fix anyway: masked columns can never win argmax, so
+# the greedy fallback path gets the same protection as the beam path.
+_NEVER_EMIT = ("<s>", "</s>", "<unk>", "[UNK]")
+_BLANKS = ("<pad>", "[PAD]")
+_special_ids: list[int] = []
+
+
 def _labels_from_tokenizer() -> list[str]:
     """CTC label list in id order, in pyctcdecode's convention: blank is "", delimiter is " "."""
+    global _special_ids
     vocab_dict = processor.tokenizer.get_vocab()
     # MMS's tokenizer holds one vocab per target language. Depending on the transformers version
     # get_vocab() returns either the active language's flat dict or the whole nested mapping, so
-    # unwrap the nested case rather than trusting one shape.
+    # unwrap the nested case rather than trusting one shape. (Measured on transformers 5.9 it is
+    # flat, and the vocabs genuinely differ per language: lin 81, sna 65, lug 79 tokens, with
+    # different index order — which is why set_language() has to rebuild this.)
     if vocab_dict and all(isinstance(v, dict) for v in vocab_dict.values()):
         active = getattr(processor.tokenizer, "target_lang", None)
         vocab_dict = vocab_dict.get(active) or next(iter(vocab_dict.values()))
     sorted_vocab = [k for k, _ in sorted(vocab_dict.items(), key=lambda kv: kv[1])]
-    # w2v-bert uses [PAD]; MMS uses <pad>. Both use | as the word delimiter.
-    return [("" if t in ("[PAD]", "<pad>") else " " if t == "|" else t) for t in sorted_vocab]
+    _special_ids = [i for i, t in enumerate(sorted_vocab) if t in _NEVER_EMIT]
+    out = []
+    for i, t in enumerate(sorted_vocab):
+        if t in _BLANKS:
+            out.append("")                     # w2v-bert uses [PAD]; MMS uses <pad>
+        elif t == "|":
+            out.append(" ")                    # both use | as the word delimiter
+        elif t in _NEVER_EMIT:
+            # One control char each: unique (pyctcdecode forbids duplicates), absent from every
+            # transcript, and SINGLE-character so the alphabet stays char-type. Multi-char entries
+            # make pyctcdecode warn that it cannot tell whether the alphabet is BPE, which is a
+            # confusing thing to leave in a log for tokens that can never be emitted anyway.
+            out.append(chr(1 + _NEVER_EMIT.index(t)))
+        else:
+            out.append(t)
+    return out
 
 
 _active_lang: str | None = None      # so we never re-swap an adapter we already hold
@@ -405,6 +437,12 @@ def logits_for(wavs: list[np.ndarray]) -> list[np.ndarray]:
             feats.to(DEVICE).half(),
             attention_mask=inp.attention_mask.to(DEVICE),
         ).logits.float().cpu().numpy()
+    # Kill <s>, </s> and <unk> before anything reads these logits. See _labels_from_tokenizer:
+    # pyctcdecode emits them literally, and even on the greedy path an <unk> is a character we
+    # would rather spend on a real guess. -1e9 rather than -inf: log_softmax over an all--inf
+    # row is NaN, and a NaN frame poisons the whole beam.
+    if _special_ids:
+        out[:, :, _special_ids] = -1e9
     lens = inp.attention_mask.sum(-1).cpu().numpy()
     # Trim padding frames before decoding, or the LM scores a tail of silence.
     ratio = out.shape[1] / inp.attention_mask.shape[1]
