@@ -275,3 +275,25 @@ that is an instinct, not a measurement.
 
 `kaggle/02_train_w2vbert.py` stays in the repo unchanged — the rules can ask for our code and the
 failed attempt is part of the honest record.
+
+---
+
+## 2026-08-01 — Sbu: checked Zindi directly, two things
+
+Committed the Lightning phase1 CSV to `submissions/` for the record (auth fight, not worth
+retelling — it's pushed, done). Then checked Zindi's Submissions tab before uploading it and
+found you'd already gotten us on the board via Kaggle — did not duplicate-submit.
+
+**1. We have a real score.** `GNXR4Rkc`, ~5h ago: **public score 0.491944347** (CER 0.255986,
+WER 0.760125). Checks out against the formula: `1 - 0.5*(0.760125+0.255986) = 0.4919`. First
+number on the board.
+
+**2. `M7Ck5P1p` errored** (~5h ago, same batch): *"Wer error: Missing entries for IDs ID_TBDTM,
+ID_JZFXM, ID_PKIDG, ID_NORBJ, ID_DNWKH, and more."* Those are phase-2-shaped IDs — looks like an
+incomplete file (rows dropped, not a clean phase-1-only submission) rather than a routing
+problem. Not investigating further without your read on which run produced it.
+
+**3. Possible date discrepancy — flagging, not assuming.** Zindi's own competition page shows
+**Close: 09 Aug 26 (9 days left)**, not the 03 Aug close date HANDOFF has stated throughout. Could
+be the page updated after HANDOFF was written, could be a display quirk, could be real. Worth a
+5-second look since it changes how much runway we're actually planning against.
