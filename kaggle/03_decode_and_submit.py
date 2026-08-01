@@ -84,6 +84,7 @@ if Path("/kaggle/working").exists():
         "waxal-ckpt": "w2vbert-waxal",                    # stage 2: the fine-tuned model dir
         "waxal-lm": "lm_corpus",                          # stage 0: the KenLM text
         "waxal-baseline": "lang_map.json",                # stage 1: the LID routing decisions
+        "waxal-router": "router_result.json",             # the router kernel: measured routing
     }
 
     def ART(name: str) -> Path:
@@ -839,6 +840,24 @@ if os.environ.get("WAXAL_DEV", "0") == "1":
     DEV_LANGS = [x for x in LANGS
                  if x in os.environ.get("WAXAL_DEV_LANGS", ",".join(LANGS)).split(",")]
     DEV_TAG = os.environ.get("WAXAL_DEV_TAG", RUN_TAG)
+
+    # WAXAL_MISROUTE=1 decodes every dev clip as the WRONG language while still scoring it against
+    # its true reference. It exists because the cost of a routing error was the last number in this
+    # pipeline that was estimated rather than measured, and it is the number the whole phase-2
+    # projection swings on: our 0.4919 is 0.7453 acoustics plus a router that answered zero Lingala
+    # and zero Shona, and how bad that is depends entirely on what a misrouted clip scores.
+    # A derangement, not a random draw — every clip moves, and the same way on every run.
+    MISROUTE = {"lin": "sna", "sna": "lug", "lug": "lin"}
+    _misroute = os.environ.get("WAXAL_MISROUTE") == "1"
+    if _misroute and len(DEV_LANGS) < len(LANGS):
+        raise SystemExit("WAXAL_MISROUTE needs all three languages loaded — it sends each "
+                         "language's clips to another language's model.")
+    def route(lg: str) -> str:
+        return MISROUTE[lg] if _misroute else lg
+    if _misroute:
+        print(f"    *** MISROUTE MODE: decoding {MISROUTE}, scoring against TRUE references.\n"
+              f"        The multi below is what a 100%-wrong router scores, i.e. the floor the\n"
+              f"        real number is interpolated against. It is not a submission candidate.")
     want = {it["id"]: it for it in dev_items if it["language"] in DEV_LANGS}
     print(f"\n=== DEV MODE === {len(want):,} clips, seed {dev['seed']}, mix {dev['actual_mix']}"
           f"\n    languages: {DEV_LANGS}   tag: {DEV_TAG}")
@@ -890,7 +909,9 @@ if os.environ.get("WAXAL_DEV", "0") == "1":
     dev_pred = {}
     with _mp.get_context("fork").Pool(os.cpu_count()) as pool:
         for lang in DEV_LANGS:
-            ids = [i for i in want if want[i]["language"] == lang and i in dev_audio]
+            # Grouped by the language each clip is DECODED as, which is what `lang` means to
+            # set_language() below. Identical to the true language unless MISROUTE is on.
+            ids = [i for i in want if route(want[i]["language"]) == lang and i in dev_audio]
             if not ids:
                 continue
             set_language(lang)
@@ -958,6 +979,38 @@ if os.environ.get("WAXAL_DEV", "0") == "1":
         res["plus_period_by_lang"][lg] = {"base": base, "plus_period": dotted}
         print(f"      {lg}: {base:.4f} -> {dotted:.4f}  ({dotted - base:+.4f})")
 
+    # ---------------------------------------------------------- routing-aware projection
+    # The number printed above is an ORACLE-ROUTING score: every dev clip was decoded as the
+    # language it actually is, because dev ids carry it. Phase 2 ids do not, so on the split that
+    # decides the prize a model never gets that for free — a router does, and it gets some of them
+    # wrong. Reporting the oracle number as "the predicted leaderboard score" is exactly the error
+    # that let 0.7453 sit next to an actual 0.4919 for a week without anyone being able to name the
+    # difference. So: state the assumption, and price it whenever the inputs to do so exist.
+    _oracle = res["per_language"]["overall"]["multi"]
+    _rr = ART("waxal-router") / "router_result.json"
+    _acc = json.load(open(_rr))["accuracy"] if _rr.exists() else {}
+    _floor = float(os.environ.get("WAXAL_MISROUTE_MULTI", "nan"))   # from a WAXAL_MISROUTE=1 run
+    res["oracle_routing_multi"] = _oracle
+    res["router_accuracy"] = _acc
+    print(f"\n  ROUTING: the {_oracle:.4f} above assumes a PERFECT router (dev ids name their")
+    print(f"  language; phase-2 ids do not). Phase 2 is worth less than this by the router's "
+          f"error rate.")
+    if _acc and _floor == _floor:            # nan != nan; both inputs measured
+        best = max(_acc, key=_acc.get)
+        p = _acc[best]
+        proj = p * _oracle + (1 - p) * _floor
+        res["projected_phase2_multi"] = proj
+        res["projection_inputs"] = {"router": best, "accuracy": p, "misroute_multi": _floor}
+        print(f"  router {best} measured {p:.4f} accurate; a misrouted clip measured {_floor:.4f}")
+        print(f"  -> projected phase 2: {proj:.4f}")
+    else:
+        miss = ("router_result.json (run kaggle/kernels/router)" if not _acc else "") + \
+               (" and " if not _acc and _floor != _floor else "") + \
+               ("WAXAL_MISROUTE_MULTI (run this script once with WAXAL_MISROUTE=1)"
+                if _floor != _floor else "")
+        print(f"  cannot price it yet — missing {miss}. Until both exist, treat {_oracle:.4f} as")
+        print(f"  an upper bound and do NOT quote it as a leaderboard prediction.")
+
     # RUN_TAG / BACKENDS, not BACKEND — the latter now holds whichever language decoded last, so
     # a mixed run would record a single arbitrary backend as though it produced every language.
     res["backend"] = RUN_TAG
@@ -1009,9 +1062,17 @@ needed = set(needed_ids)
 print(f"submission contract: {len(needed_ids):,} unique ids across {len(TEMPLATES)} template(s)")
 
 audio_store, known_lang = {}, {}
-_lang_map = ART("waxal-baseline") / "lang_map.json"       # stage 1 wrote it; reuse, don't re-LID
+# Routing source, best first. The router kernel's map wins outright when it is mounted, because it
+# is the only routing in this repo whose accuracy was MEASURED against labelled audio; stage 1's is
+# an unmeasured open-set argmax from a 256-language model that has never seen this corpus, and it
+# is what produced 0.4919. Kept as the fallback, not the default.
+_router_map = ART("waxal-router") / "lang_map.json"
+_lang_map = _router_map if _router_map.exists() else ART("waxal-baseline") / "lang_map.json"
 if _lang_map.exists():
     known_lang = json.load(open(_lang_map))
+    print(f"routing map: {_lang_map}  ({len(known_lang):,} ids)"
+          + ("  [MEASURED — router kernel]" if _lang_map == _router_map else
+             "  [stage 1, open-set, UNMEASURED — mount waxal-router instead if you have it]"))
 
 # Cheapest and most reliable source first: the id prefix.
 for i in needed_ids:
@@ -1027,14 +1088,25 @@ print(f"language from id prefix: {n_prefix:,} / {len(needed_ids):,}")
 # never fires — it is load-bearing for every single clip, and a LID error means decoding with
 # the wrong KenLM, which corrupts the whole utterance rather than costing a few WER points.
 #
-# KNOWN GAP — this stage still routes CLOSED-SET, and stage 1 no longer does. Unconstrained,
-# mms-lid-256 calls the phase-2 clips luo/nyn/lug/kin/kam/xog (commit e9b3885,
-# local/diagnose_lid_unconstrained.py). This stage cannot simply copy stage 1's open-set fix,
-# because what it decodes with — a w2v-bert fine-tuned on lin/sna/lug transcripts, plus one KenLM
-# per those three languages — has no way to emit Dholuo or Runyankole at all. Fixing it properly
-# means splitting the stage: fine-tuned model + KenLM for phase 1 and the lug slice of phase 2,
-# MMS adapters for the rest. Until that lands, stage 1's phase-2 file is the better one to upload
-# and this stage's phase-2 output should be treated as phase-1-quality only.
+# CORRECTION, 1 Aug — this block used to say stage 1's open-set routing was the fix and that
+# stage 1's phase-2 file was the better one to upload. Both were wrong, and the cost was the whole
+# competition so far.
+#
+# Open-set routing asks "which of 256 languages is this", and mms-lid-256 answered phase 2 with
+# luo 42.5% / lug 27.5% / nyn 20% / guz,xog,kin,kam 2.5% each — zero Lingala, zero Shona, on a
+# corpus that is 43.9% Lingala and 41.1% Shona (local/diagnose_lid_unconstrained.py, commit
+# e9b3885). We shipped that, and it scored 0.4919 with checkpoints that measure 0.7453 on dev when
+# the language is known. Solving 0.4919 = p*0.7453 + (1-p)*0.30 puts routing accuracy near 0.43.
+#
+# The error in the old reasoning was treating "the model can emit Dholuo" as an advantage. The
+# REFERENCE transcripts are always lin, sna or lug — that is the whole challenge — so a clip
+# decoded perfectly in Dholuo scores against a Lingala reference exactly as badly as noise does.
+# Being able to express "this is Dholuo" is worth nothing when no cell may contain Dholuo.
+# Closed-set is not a limitation here; it is the correct prior, and it is now enforced below.
+#
+# What replaces it is a router chosen by measurement rather than by argument: see
+# kaggle/kernels/router/, which scores our own corpus-tuned ASR checkpoints and Whisper's language
+# head against labelled phase-1 test audio and writes the winner's map. Mount it as waxal-router.
 n_lid = len(needed_ids) - n_prefix
 if n_lid:
     print(f"*** {n_lid:,} ids carry no language ({100*n_lid/len(needed_ids):.0f}%) -> "
@@ -1102,6 +1174,20 @@ print(f"resolved {len(audio_store):,} / {len(needed):,}")
 
 
 # ---------------------------------------------------------------- 5. language ID
+# Every cell of every reference is lin, sna or lug, so a routing decision outside those three is
+# always wrong no matter how right it is about the audio. Discard such labels and let the
+# closed-set LID below re-decide those clips. Re-measuring beats remapping: a hand-written
+# "luo -> lug, guz -> sna" neighbour table would be my guess about Bantu proximity dressed up as a
+# rule, and this path already owns a model that answers the question directly.
+_off_set = [i for i in needed_ids
+            if i in audio_store and known_lang.get(i) is not None and known_lang[i] not in LANGS]
+if _off_set:
+    print(f"routing map named a language outside {LANGS} on {len(_off_set):,} clip(s) "
+          f"({dict(pd.Series([known_lang[i] for i in _off_set]).value_counts().head(8))}) — "
+          f"re-deciding those closed-set, since no reference cell can contain them")
+    for i in _off_set:
+        known_lang.pop(i, None)
+
 unknown = [i for i in needed_ids if i in audio_store and i not in known_lang]
 if unknown:
     from transformers import AutoFeatureExtractor, Wav2Vec2ForSequenceClassification
@@ -1134,21 +1220,18 @@ for lang in LANGS:
     t = tuned.get(lang)
     decoders[lang] = make_decoder(lang, t["alpha"], t["beta"]) if t and t["alpha"] is not None else None
 
-# Which languages do we actually have to decode? LANGS is the set we hold KenLMs for, but stage 1
-# routes OPEN-SET: on phase 2 its lang_map.json can name luo/nyn/xog/kam/kin, none of which are in
-# LANGS. Iterating LANGS alone silently skips those clips and hands them to BLANK_FILL — a
-# guaranteed total miss on every one, on the split that decides the prize.
-#
-# This is the "KNOWN GAP" flagged further up, and dropping w2v-bert is what closes it. That note
-# was right that a model fine-tuned on lin/sna/lug transcripts can never emit Dholuo; mms-1b-all
-# ships adapters for those languages, so each clip decodes in the language it is actually in.
-# There is no KenLM for them, so they decode greedily — worse than lin/sna/lug, vastly better
-# than a blank row.
-_routed = [l for l in dict.fromkeys(known_lang.get(i) for i in needed_ids) if l]
-DECODE_LANGS = LANGS + [l for l in _routed if l not in LANGS]
-if len(DECODE_LANGS) > len(LANGS):
-    print(f"\nopen-set routing sent clips to {DECODE_LANGS[len(LANGS):]} — decoding each with "
-          f"its own MMS adapter, greedily (no KenLM for those).")
+# DECODE_LANGS used to extend past LANGS so that clips stage 1 routed to luo/nyn/xog/kam/kin could
+# be decoded with those MMS adapters. That is gone: every reference cell is lin, sna or lug, so
+# emitting Dholuo is not "the language it is actually in", it is an unmatchable string. Section 5
+# now strips off-set labels and re-decides them closed-set, so this should be a no-op — the check
+# stays because a silent regression here is worth a quarter of a point, and BLANK_FILL would hide
+# it as a merely-poor score rather than a broken one.
+DECODE_LANGS = list(LANGS)
+_stray = sorted({l for i in needed_ids if (l := known_lang.get(i)) and l not in LANGS})
+if _stray:
+    raise SystemExit(f"routing still names {_stray} after the closed-set pass in section 5 — "
+                     f"those clips would be dropped to BLANK_FILL. Fix the routing, do not "
+                     f"widen DECODE_LANGS: no reference cell can contain them.")
 
 preds = {}
 with multiprocessing.get_context("fork").Pool(os.cpu_count()) as pool:
