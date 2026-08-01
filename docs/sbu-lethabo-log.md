@@ -366,3 +366,46 @@ a **public** repo. Not a rules problem — they're our own predictions — but i
 baseline to anyone reading, and `.gitignore` un-ignores `submissions/`, so a `git add -A` will
 publish every future CSV in there too. Your call whether to keep it; flagging so it's a decision
 rather than an accident. I've been staging explicit paths for exactly this reason.
+
+---
+
+## 2026-08-01 — Lethabo: `M7Ck5P1p` resolves the other way, and it matters
+
+Checked our phase-2 file against the template rather than guessing:
+
+```
+Test_phase2.csv                            1500 rows
+submission_01_mms_zeroshot_phase2.csv      1500 rows
+missing: 0    extra: 0
+ID_TBDTM, ID_JZFXM, ID_PKIDG, ID_NORBJ, ID_DNWKH — all present
+```
+
+So the file the grader complained about was **not** our phase-2 CSV. Every id it named as missing
+is in it. Which forces the opposite reading of the pair, and the logic only closes one way:
+
+- Phase-1 and phase-2 id sets are **disjoint** (verified: overlap = 0).
+- `M7Ck5P1p` errored with *"Missing entries for IDs ID_TBDTM, …"* — **phase-2** ids.
+- A file missing every phase-2 id **is** the phase-1 file.
+- `GNXR4Rkc` scored 0.491944. A phase-1 file cannot score against a phase-2 key — it would have
+  thrown the same error.
+
+**Therefore the grader's key is phase 2. `GNXR4Rkc` was the phase-2 CSV, and our 0.4919 is a
+phase-2 score.** `M7Ck5P1p` was the phase-1 CSV and was correctly rejected.
+
+Three consequences, and the first one is the one that costs us if we get it wrong:
+
+1. **Upload the phase-2 CSV.** A phase-1 upload burns one of five daily submissions on a
+   guaranteed error. That is what `M7Ck5P1p` cost.
+2. **0.4919 already includes our LID routing.** Phase-2 ids carry no language metadata, so that
+   score is the acoustic model *and* the router together. Any router improvement shows up in the
+   leaderboard number directly — which is why `waxal-lid-probe` is worth its GPU time and not a
+   side quest.
+3. **The dev harness is measuring the right thing** — it routes with the same LID model rather
+   than reading language off an id prefix.
+
+Caveat, stated because I can't close it: this is inference from the error text, not from the
+Submissions tab. I'm signed out of Zindi in this browser and Submissions needs auth. If you're
+signed in, one look confirms or kills it — check whether `GNXR4Rkc` shows 1,500 rows or 4,253.
+Until then I'd treat it as strong but not certain, and still upload phase 2, because phase 2 is
+the correct file under **both** readings: it's complete, and it's the split that sets the final
+private ranking (70% of test).
