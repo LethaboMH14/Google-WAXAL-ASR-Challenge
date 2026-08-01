@@ -131,11 +131,23 @@ env["CUDA_VISIBLE_DEVICES"] = "0"
 # 7.5 h against Kaggle's 9 h cap leaves room for setup, the closing eval, and the final save.
 env.setdefault("WAXAL_MAX_HOURS", "7.5")
 
-# MAX_STEPS is now only the END of the LR schedule, not a promise about this session. Keeping it
-# at the 2,500 the recipe calls for means leg 2 resumes into the SAME schedule rather than a
-# rebuilt one — if leg 1 declared 1,200 and leg 2 declared 2,400, the learning rate would jump
-# back up at the seam. Two 7.5 h legs at ~24 s/step reach roughly 2,200 steps, inside the
-# 2,000-3,500 band WAXAL-NET converged in.
+# MAX_STEPS is now only the END of the LR schedule, not a promise about this session.
+#
+# LEG 2 MUST NOT INHERIT THIS 2,500. Measured on leg 1 from the interval between logging points:
+# 26.0 s/step steady state (150 steps in 3,899 s), so a 7.5 h leg is ~1,039 steps and two legs
+# reach ~2,077. The scheduler is `linear` with warmup 200, i.e. LR decays to zero AT max_steps —
+# so finishing at 2,077 against a 2,500 schedule stops with LR still at
+#   5e-5 * (2500-2077)/(2500-200) = 9.2e-6, 18% of peak, never annealed.
+# A CTC fine-tune that ends mid-decay is worse than the same compute landed at zero.
+#
+# So when pushing leg 2: read the actual step number of leg 1's final checkpoint and set
+#   WAXAL_MAX_STEPS = <that step> + floor(7.2 * 3600 / 26)     # ~997, leaving setup headroom
+# so the decay reaches zero exactly as the wall-clock budget runs out. Do NOT guess it in
+# advance — if leg 1 stops early the schedule is wrong in the other direction, and a schedule
+# rebuilt SHORTER than the steps already taken makes the LR jump at the seam.
+#
+# ~2,080 total sits at the low end of the 2,000-3,500 band WAXAL-NET converged in. A third leg
+# would buy more, at 7.5 h against a 30 GPU-hour week that also has to carry stage 1 and stage 3.
 env.setdefault("WAXAL_MAX_STEPS", "2500")
 
 # Checkpoint every 250 steps (~100 min), not the 100 the script derives. Each checkpoint is ~7 GB;
