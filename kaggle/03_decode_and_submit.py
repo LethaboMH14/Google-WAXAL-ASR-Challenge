@@ -747,7 +747,18 @@ for lang, cfg in HF_CONFIGS.items():
     ds = load_dataset("google/WaxalNLP", cfg, split="validation", streaming=True)
     ds = ds.cast_column("audio", Audio(sampling_rate=16000))
     wavs, refs = [], []
+    n_skipped = 0
     for row in ds:
+        # SECOND LEAK, fixed 1 Aug. The dev set is itself drawn from this same validation split
+        # (see the dev-audio loader below, which streams split="validation" for the same configs).
+        # Tuning alpha/beta on the first 150 rows therefore tuned on clips the dev score is then
+        # reported over — the LM weights got fitted to the very utterances used to judge them.
+        # This is independent of the KenLM corpus leak: fixing the corpus does not stop the grid
+        # search from overfitting the eval sample. Skipping by id costs nothing but a longer
+        # stream, because validation is far larger than 900 + 150.
+        if str(row["id"]) in DEV_IDS:
+            n_skipped += 1
+            continue
         w = decode_audio_cell(row["audio"])
         if not (1.0 * 16000 <= len(w) <= MAX_SECONDS * 16000):
             continue
@@ -755,6 +766,10 @@ for lang, cfg in HF_CONFIGS.items():
         refs.append(normalise(row["transcription"]))
         if len(wavs) >= N_TUNE:
             break
+    print(f"  {lang}: tuning on {len(wavs)} clips, {n_skipped} dev clips skipped")
+    if not wavs:
+        print(f"  {lang}: no non-dev tuning clips found — skipping LM tuning for this language")
+        continue
 
     all_logits = []
     for k in range(0, len(wavs), 4):
