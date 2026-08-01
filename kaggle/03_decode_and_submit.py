@@ -1043,18 +1043,32 @@ if not zip_path.exists():
     os.system(f"wget -q -O {zip_path} {PHASE2_URL}")
 if zip_path.exists() and zip_path.stat().st_size > 0:
     import soundfile as sf, librosa
+    # The zip is not purely audio — the LID probe crashed on a member soundfile reported as
+    # "Format not recognised". This loop happened to survive it because a junk member's stem is
+    # not in `needed`, but that is luck, not a guard: one corrupt member whose name DOES match a
+    # phase-2 id would take down a submission run at the last step. Catch per member and let the
+    # id fall through to the HF fallback below, then to BLANK_FILL. Never abort the whole run for
+    # one unreadable clip.
+    bad = []
     with zipfile.ZipFile(zip_path) as zf:
         for n in [x for x in zf.namelist() if not x.endswith("/")]:
             stem = Path(n).stem
             if stem not in needed:
                 continue
-            with zf.open(n) as fh:
-                w, sr = sf.read(fh, dtype="float32")
+            try:
+                with zf.open(n) as fh:
+                    w, sr = sf.read(fh, dtype="float32")
+            except Exception as e:  # noqa: BLE001
+                bad.append(f"{n}: {type(e).__name__}")
+                continue
             if w.ndim > 1:
                 w = w.mean(axis=1)
             if sr != 16000:
                 w = librosa.resample(w, orig_sr=sr, target_sr=16000)
             audio_store[stem] = w.astype(np.float32)
+    if bad:
+        print(f"  {len(bad):,} zip member(s) would not decode, e.g. {bad[:5]}\n"
+              f"  those ids fall through to the HuggingFace fallback below")
 print(f"phase 2 clips: {len(audio_store):,}")
 
 missing = needed - set(audio_store)

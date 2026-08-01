@@ -114,16 +114,36 @@ if zp.exists() and zp.stat().st_size > 0:
     import librosa
     import soundfile as sf
 
+    # v1 died here on a member soundfile could not decode ("Format not recognised"). The zip is
+    # not purely audio. Two guards, because a router that silently drops clips is worse than one
+    # that crashes: filter by extension first, then catch and COUNT whatever still fails, so the
+    # tally prints what was lost instead of hiding it.
+    AUDIO_EXT = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".opus"}
+    skipped, failed = [], []
     with zipfile.ZipFile(zp) as zf:
         for nm in [x for x in zf.namelist() if not x.endswith("/")]:
-            with zf.open(nm) as fh:
-                w, sr = sf.read(io.BytesIO(fh.read()), dtype="float32")
+            if nm.startswith("__MACOSX") or Path(nm).suffix.lower() not in AUDIO_EXT:
+                skipped.append(nm)
+                continue
+            try:
+                with zf.open(nm) as fh:
+                    w, sr = sf.read(io.BytesIO(fh.read()), dtype="float32")
+            except Exception as e:  # noqa: BLE001
+                failed.append(f"{nm}: {type(e).__name__}")
+                continue
             if w.ndim > 1:
                 w = w.mean(axis=1)
             if sr != 16000:
                 w = librosa.resample(w, orig_sr=sr, target_sr=16000)
             phase2[Path(nm).stem] = w.astype(np.float32)
+    if skipped:
+        print(f"  skipped {len(skipped):,} non-audio member(s), e.g. {skipped[:5]}")
+    if failed:
+        print(f"  FAILED to decode {len(failed):,} member(s), e.g. {failed[:5]}")
 print(f"phase 2: {len(phase2):,} clips")
+if phase2 and len(phase2) < 1500:
+    print(f"  WARNING: expected 1,500 phase-2 clips, loaded {len(phase2):,}. The agreement figures "
+          f"below cover only what loaded, not the full private split.")
 
 # ------------------------------------------------------------------ the three routers
 try:
