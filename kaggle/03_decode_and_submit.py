@@ -841,10 +841,21 @@ for lang, cfg in HF_CONFIGS.items():
     # Grid reaches to alpha=1.5: with a genuine multi-million-word LM the optimum sits well
     # above the 0.5 that suits a corpus-of-transcripts LM, and stopping at 0.9 would quietly
     # cap the single biggest win in the pipeline.
-    with multiprocessing.get_context("fork").Pool(os.cpu_count()) as pool:
-        for alpha in (0.3, 0.5, 0.7, 0.9, 1.2, 1.5):
-            for beta in (0.5, 1.5, 3.0):
-                dec = make_decoder(lang, alpha, beta)
+    #
+    # The pool is opened INSIDE the loop, after make_decoder, and thrown away with the decoder.
+    # pyctcdecode does not pickle the KenLM object to the workers — it stashes it in a CLASS-level
+    # dict, BeamSearchDecoderCTC.model_container, and ships only the hash key. A forked worker
+    # therefore sees exactly the container that existed at fork time. Opening the pool first (or
+    # reusing one pool across 18 decoders) means every decoder built afterwards is a key the
+    # workers have never heard of, and decode_batch dies in the worker with
+    #     KeyError: b'\xbf;5\x9b\xb8M\x99g...'
+    # which is what killed waxal-lugA on 1 Aug. The other two decode sites already build their
+    # decoders before their pool; this one could not, because the decoder is the thing being swept.
+    # 18 forks per language is ~1 s total against a multi-minute sweep.
+    for alpha in (0.3, 0.5, 0.7, 0.9, 1.2, 1.5):
+        for beta in (0.5, 1.5, 3.0):
+            dec = make_decoder(lang, alpha, beta)
+            with multiprocessing.get_context("fork").Pool(os.cpu_count()) as pool:
                 hyp = [normalise(t) for t in
                        dec.decode_batch(pool, all_logits, beam_width=BEAM_WIDTH)]
                 w = wer_metric.compute(predictions=hyp, references=refs)
