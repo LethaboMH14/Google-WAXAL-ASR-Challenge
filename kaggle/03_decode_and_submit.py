@@ -471,6 +471,35 @@ if PLUS_PERIOD:
 if PLUS_PERIOD - set(LANGS):
     raise SystemExit(f"WAXAL_PLUS_PERIOD: unknown language(s) {sorted(PLUS_PERIOD - set(LANGS))}")
 
+# Which Whisper language token to force, per WAXAL language. Format: "lug=sw,sna=sw", or a bare
+# code to apply to all ("sw"). Defined HERE, above the loader, because _wn_load runs at import.
+#
+# Off by default, and the default is still right for a checkpoint that carries its own forced
+# decoder ids (see transcribe_whisper). But "carries its own" is an assumption, not a fact:
+# cdli/whisper-large-v3_finetuned_ugandan_luganda_waxal_7 ships generation_config language="sw",
+# while every KasuleTrevor/cdli-whisper-ml-* checkpoint ships language=null. On the second kind,
+# passing nothing does not mean "use the fine-tuned default" — it means Whisper runs its own
+# language ID on each clip and forces whatever that returns, independently, 1500 times. That is a
+# silent per-clip coin flip in the middle of a decode, so it has to be overridable.
+#
+# Swahili is the code to reach for: it is the closest language Whisper has a token for at all, and
+# it is what CDLI fine-tuned and evaluated Luganda under. Whisper has no Luganda, Lingala or Shona
+# token, so for these three there is nothing "correct" to pass — only nearer misses.
+WHISPER_LANG: dict[str, str] = {}
+for _pair in os.environ.get("WAXAL_WHISPER_LANG", "").split(","):
+    _pair = _pair.strip()
+    if not _pair:
+        continue
+    if "=" in _pair:
+        _lg, _code = _pair.split("=", 1)
+        WHISPER_LANG[_lg.strip()] = _code.strip()
+    else:
+        WHISPER_LANG.update({lg: _pair for lg in LANGS})
+if WHISPER_LANG:
+    print(f"whisper language tokens forced: {WHISPER_LANG}")
+if set(WHISPER_LANG) - set(LANGS):
+    raise SystemExit(f"WAXAL_WHISPER_LANG: unknown language(s) {sorted(set(WHISPER_LANG) - set(LANGS))}")
+
 
 def finish(text: str, lang: str) -> str:
     """The single point where a decoded hypothesis becomes a submitted cell.
@@ -522,6 +551,17 @@ if BACKEND in ("waxalnet", "whisper"):
             if kind == "whisper":
                 md = WhisperForConditionalGeneration.from_pretrained(
                     repo, torch_dtype=torch.float16).to(DEVICE).eval()
+                # Say out loud which language token this checkpoint will decode under. A null here
+                # with no WAXAL_WHISPER_LANG override means per-clip language detection, which
+                # looks identical in the log to a checkpoint that knows its own language.
+                _cfg_lang = getattr(md.generation_config, "language", None)
+                if not _cfg_lang and not WHISPER_LANG.get(lang):
+                    print(f"    !! {repo} has generation_config.language=null and no "
+                          f"WAXAL_WHISPER_LANG for {lang} — Whisper will language-detect EACH "
+                          f"clip independently. Set WAXAL_WHISPER_LANG={lang}=sw to pin it.")
+                else:
+                    print(f"    whisper language: {WHISPER_LANG.get(lang) or _cfg_lang}"
+                          f"{' (forced)' if WHISPER_LANG.get(lang) else ' (from checkpoint)'}")
             else:
                 md = AutoModelForCTC.from_pretrained(
                     repo, torch_dtype=torch.float16).to(DEVICE).eval()
@@ -670,11 +710,16 @@ WHISPER_BEAMS = int(os.environ.get("WAXAL_WHISPER_BEAMS", "1"))
 def transcribe_whisper(wavs: list[np.ndarray]) -> list[str]:
     """Seq2seq decode. Returns text directly — there is no logits/beam stage to hand to KenLM.
 
-    Deliberately does NOT pass `language=`/`task=`: these checkpoints are fine-tuned on a single
-    language and carry their own generation_config with the right forced decoder ids. Overriding
-    them with a guess (Whisper has no Lingala or Shona language token at all) is how you get an
-    English-flavoured transliteration back.
+    By default this does NOT pass `language=`/`task=`: a checkpoint fine-tuned on one language
+    carries its own generation_config with the right forced decoder ids, and overriding them with
+    a guess is how you get an English-flavoured transliteration back. WAXAL_WHISPER_LANG opts out
+    of that default for checkpoints whose generation_config leaves `language` null — there the
+    "default" is per-clip language detection, which is not a default anyone chose.
     """
+    kw = {}
+    code = WHISPER_LANG.get(_active_lang or "")
+    if code:
+        kw = {"language": code, "task": "transcribe"}
     inp = processor(wavs, sampling_rate=16000, return_tensors="pt",
                     return_attention_mask=True)
     with torch.inference_mode():
@@ -686,6 +731,7 @@ def transcribe_whisper(wavs: list[np.ndarray]) -> list[str]:
             # max_length. Capping it bounds the damage to one clip instead of one batch's runtime.
             max_new_tokens=200,
             repetition_penalty=1.1,
+            **kw,
         )
     return processor.batch_decode(ids, skip_special_tokens=True)
 
