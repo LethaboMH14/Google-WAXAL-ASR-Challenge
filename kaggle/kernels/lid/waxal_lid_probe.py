@@ -48,7 +48,9 @@ from pathlib import Path
 REPO_URL = "https://github.com/LethaboMH14/Google-WAXAL-ASR-Challenge"
 REPO = Path("/kaggle/repo")
 WORKING = Path("/kaggle/working")
-PHASE2_URL = "https://storage.googleapis.com/waxalphase2/audio.zip"
+# 2026-08-02: organisers withdrew the original phase-2 test set and published a replacement.
+# The old audio.zip is now a hard 404, so nothing silently keeps using it.
+PHASE2_URL = "https://storage.googleapis.com/waxalphase2/newaudios.zip"
 
 LANGS = ["lin", "sna", "lug"]
 HF_CONFIGS = {"lin": "lin_asr", "sna": "sna_asr", "lug": "lug_asr"}
@@ -141,9 +143,18 @@ if zp.exists() and zp.stat().st_size > 0:
     if failed:
         print(f"  FAILED to decode {len(failed):,} member(s), e.g. {failed[:5]}")
 print(f"phase 2: {len(phase2):,} clips")
-if phase2 and len(phase2) < 1500:
-    print(f"  WARNING: expected 1,500 phase-2 clips, loaded {len(phase2):,}. The agreement figures "
-          f"below cover only what loaded, not the full private split.")
+# Reconcile against the scored id list, not a hardcoded count. The count is precisely what moved
+# on 2026-08-02 (1,500 -> 892 when the test set was replaced), so a literal here is a trap.
+_expected_n = None
+try:
+    import csv as _csv
+    with open(REPO / "data" / "zindi" / "Test_phase2.csv", encoding="utf-8") as _fh:
+        _expected_n = sum(1 for r in _csv.reader(_fh) if r and r[0].strip()) - 1
+except Exception as e:  # noqa: BLE001
+    print(f"  could not read Test_phase2.csv to check the clip count ({type(e).__name__}: {e})")
+if _expected_n and phase2 and len(phase2) < _expected_n:
+    print(f"  WARNING: Test_phase2.csv lists {_expected_n:,} clips, loaded {len(phase2):,}. The "
+          f"agreement figures below cover only what loaded, not the full split.")
 
 # ------------------------------------------------------------------ the three routers
 try:

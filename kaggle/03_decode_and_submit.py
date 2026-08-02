@@ -1147,7 +1147,11 @@ if os.environ.get("WAXAL_DEV", "0") == "1":
 # ---------------------------------------------------------------- 4. resolve test audio
 # TWO submission templates, and they are disjoint sets with different shapes:
 #   SampleSubmission.csv  4,253 rows, ids like `lug_96114`  -> phase 1
-#   Test_phase2.csv       1,500 rows, ids like `ID_TBDTM`   -> phase 2, already ID/Target shaped
+#   Test_phase2.csv         892 rows, ids like `ID_QNYPTX`  -> phase 2, already ID/Target shaped
+# Phase-2 numbers above are the CORRECTED set (2026-08-02). The withdrawn one was 1,500 rows with
+# five-character ids (`ID_TBDTM`); these are six. Its Target column ships filled with the
+# placeholder "the quick brown fox" rather than blanks — harmless, since the write-out below
+# overwrites the whole column, but do not ever upload this file untouched.
 # Measured 30 Jul: zero id overlap between them. We predict the union and write one file per
 # template, so whichever phase is open we have a correctly-shaped file ready and never have
 # to guess which one Zindi wants.
@@ -1334,6 +1338,18 @@ if unknown and _map_path and Path(_map_path).exists():
         raise SystemExit(f"WAXAL_LANG_MAP names {_bad}, outside {LANGS} — those clips would be "
                          f"dropped to BLANK_FILL. Fix the map.")
     _hit = [i for i in unknown if i in _ext]
+    # A map that was named explicitly and matches (almost) nothing is a WRONG map, not an empty
+    # one — the id space moved under it. That happened on 2026-08-02 when the organisers replaced
+    # the phase-2 test set: ids went from five characters to six, so every pre-existing routing
+    # map matches zero clips. Without this, the run prints "routed 0 / 892", falls through to the
+    # LID, and looks like it worked — which is the exact silent-misrouting failure that cost us
+    # the 0.4919 submission. If you asked for a map, it has to actually route.
+    if len(_hit) < 0.5 * len(unknown):
+        raise SystemExit(
+            f"WAXAL_LANG_MAP {Path(_map_path).name} matched {len(_hit):,} of {len(unknown):,} "
+            f"unlabelled clips. A map you named explicitly should route nearly all of them; this "
+            f"one is stale or built for a different test set. Regenerate it for the current audio "
+            f"rather than letting the run fall through to {LID_MODEL}.")
     for i in _hit:
         known_lang[i] = _ext[i]
     print(f"WAXAL_LANG_MAP {Path(_map_path).name}: routed {len(_hit):,} / {len(unknown):,} "
