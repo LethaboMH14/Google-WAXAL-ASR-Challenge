@@ -13,8 +13,14 @@ browser-automated typing into Kaggle's Monaco-in-iframe editor proved unreliable
 on a fresh notebook: the cell shows focus but keystrokes don't land), so this runs as a plain
 script kernel instead.
 
-WAXAL_PLUS_PERIOD is intentionally omitted here (v1 of this run had it set to "lin,sna,lug" and
-DEV showed it cost every language ~1-2 points of multi-score — see the 2026-08-02 log entry).
+WAXAL_PLUS_PERIOD="lin,sna,lug" and WAXAL_NO_LM="1" are both deliberate, not defaults. Measured
+2026-08-02 across four combinations (LM on/off x period on/off) reweighted to the CORRECTED
+phase-2 mix (lin 50.0% / sna 49.9% / lug 0.1% — see that day's log entries for how this differs
+from the withdrawn set): no-LM beats with-LM in both period conditions (0.7899 vs 0.7754 with
+period on; 0.7800 vs 0.7642 with period off), and period-on beats period-off in both LM
+conditions. no-LM + period is the best of the four at 0.7899. Do not "fix" either of these
+without a fresh measurement — an earlier version of this file had the opposite belief about
+period, from misreading a diagnostic field that double-counted it.
 """
 
 import json
@@ -64,14 +70,15 @@ env["WAXAL_BACKENDS"] = "lin=waxalnet,sna=waxalnet,lug=waxalnet"
 env["WAXAL_LIN"] = "douyeszn/w2vbert-lin-waxal-aug-ft"
 env["WAXAL_SNA"] = "waxal-benchmarking/mms-300m-waxal-sna"
 env["WAXAL_LUG"] = "waxal-benchmarking/mms-300m-waxal-lug"
-env["WAXAL_RUN_TAG"] = "lineup-noperiod"
+env["WAXAL_PLUS_PERIOD"] = "lin,sna,lug"
+env["WAXAL_RUN_TAG"] = "lineup"
 env["WAXAL_LANG_MAP"] = str(LANG_MAP)
 
 dev_env = dict(env, WAXAL_DEV="1")
 print("\n=== RUN 1/2: DEV ===")
 sh([sys.executable, str(REPO / "kaggle" / "03_decode_and_submit.py")], env=dev_env)
 
-dev_path = WORKING / "dev_result_lineup-noperiod.json"
+dev_path = WORKING / "dev_result_lineup.json"
 if dev_path.exists():
     print("DEV RESULT:", json.load(open(dev_path)))
 else:
@@ -80,7 +87,7 @@ else:
 print("\n=== RUN 2/2: SUBMISSION ===")
 sh([sys.executable, str(REPO / "kaggle" / "03_decode_and_submit.py")], env=env)
 
-for name in ("submission_03_lineup-noperiod_lm_phase1.csv", "submission_03_lineup-noperiod_lm_phase2.csv"):
+for name in ("submission_03_lineup_lm_phase1.csv", "submission_03_lineup_lm_phase2.csv"):
     csv = WORKING / name
     if csv.exists():
         sh([sys.executable, str(REPO / "local" / "validate_submission.py"), str(csv)], check=False)
