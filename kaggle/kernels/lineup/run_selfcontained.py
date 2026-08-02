@@ -8,10 +8,13 @@ accounts (private kernels return 0 results when searched from another account). 
 the same routing decision from the repo directly: data/routing/lang_map_okwija_phase2.json is
 already committed, so no kernel mount is needed.
 
-Meant to be fetched and exec'd from a near-empty notebook cell rather than typed in directly —
-typing a script this size into Kaggle's editor via browser automation has twice produced corrupted
-Python (autocomplete/bracket-autoclose eating characters), so the actual logic lives here, in a
-normal file, edited normally.
+Meant to be pushed directly via `kaggle kernels push` rather than typed into the notebook editor —
+browser-automated typing into Kaggle's Monaco-in-iframe editor proved unreliable (reproducible even
+on a fresh notebook: the cell shows focus but keystrokes don't land), so this runs as a plain
+script kernel instead.
+
+WAXAL_PLUS_PERIOD is intentionally omitted here (v1 of this run had it set to "lin,sna,lug" and
+DEV showed it cost every language ~1-2 points of multi-score — see the 2026-08-02 log entry).
 """
 
 import json
@@ -61,15 +64,14 @@ env["WAXAL_BACKENDS"] = "lin=waxalnet,sna=waxalnet,lug=waxalnet"
 env["WAXAL_LIN"] = "douyeszn/w2vbert-lin-waxal-aug-ft"
 env["WAXAL_SNA"] = "waxal-benchmarking/mms-300m-waxal-sna"
 env["WAXAL_LUG"] = "waxal-benchmarking/mms-300m-waxal-lug"
-env["WAXAL_PLUS_PERIOD"] = "lin,sna,lug"
-env["WAXAL_RUN_TAG"] = "lineup"
+env["WAXAL_RUN_TAG"] = "lineup-noperiod"
 env["WAXAL_LANG_MAP"] = str(LANG_MAP)
 
 dev_env = dict(env, WAXAL_DEV="1")
 print("\n=== RUN 1/2: DEV ===")
 sh([sys.executable, str(REPO / "kaggle" / "03_decode_and_submit.py")], env=dev_env)
 
-dev_path = WORKING / "dev_result_lineup.json"
+dev_path = WORKING / "dev_result_lineup-noperiod.json"
 if dev_path.exists():
     print("DEV RESULT:", json.load(open(dev_path)))
 else:
@@ -78,7 +80,7 @@ else:
 print("\n=== RUN 2/2: SUBMISSION ===")
 sh([sys.executable, str(REPO / "kaggle" / "03_decode_and_submit.py")], env=env)
 
-for name in ("submission_03_lineup_lm_phase1.csv", "submission_03_lineup_lm_phase2.csv"):
+for name in ("submission_03_lineup-noperiod_lm_phase1.csv", "submission_03_lineup-noperiod_lm_phase2.csv"):
     csv = WORKING / name
     if csv.exists():
         sh([sys.executable, str(REPO / "local" / "validate_submission.py"), str(csv)], check=False)
