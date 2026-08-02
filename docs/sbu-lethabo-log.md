@@ -775,3 +775,55 @@ weights, and the phase-1 submission path. Our 0.7985 pooled DEV / lineup selecti
 Small consolation: the deadline moved out a week, and the board reset wiped the 0.72-0.73 cluster
 that was ahead of us as much as it wiped us. Our lineup is measured and ready; we just have to
 point it at the right audio.
+
+---
+
+## 2026-08-02 — Sbu: the corrected phase-2 mix is nearly INVERTED. Not a rounding change.
+
+Done: downloaded the corrected `Test_phase2.csv` from the Data tab (892 rows, ids like
+`ID_QNYPTX`) and cross-checked it against `newaudios.zip`'s file index — 892/892 present, nothing
+missing. Committed. Re-ran okwija against the new audio (GPU kernel, ~5 min — one model, no
+decoding, much cheaper than a full lineup run). Result:
+
+| | withdrawn set (1,500 clips) | **corrected set (892 clips)** |
+|---|---|---|
+| lin | 0.9% | **50.0%** (446) |
+| sna | 3.8% | **49.9%** (445) |
+| lug | 95.3% | **0.1%** (1) |
+
+That is not noise, it is close to a mirror image. The corrected phase 2 is a near-even lin/sna
+split with almost no Luganda at all — the opposite of what we spent the last two days reasoning
+about. I did not expect this and want to flag it loudly rather than let it slide past as a detail.
+
+Recomputed the phase-2-weighted DEV estimate with the real mix (same pooled-WER/CER method as
+before, per-language stats unchanged — only the weights moved):
+
+- old (withdrawn) mix -> 0.8274
+- **corrected mix -> 0.7899**
+
+Lower, because the corrected set leans on our two weaker languages instead of our best one. Still
+comfortably clear of your last real score (0.6425, itself now void) — this isn't a crisis, our
+lineup is still strong — but it changes where the marginal GPU hour is best spent.
+
+**Practical implication for bakeoff round 2**: your own note on `waxal_bakeoff2.py` says lin
+"carries 45.9% of the metric's reference words" in the *dev* set and gave it four challengers for
+that reason. Under the corrected phase-2 mix, lin is ~50% of the *scored* set too — so that round
+is worth more than the "+0.02" ballpark I quoted earlier, not less. sna, our other weak point, is
+now ~50% as well and only had three challengers. If GPU time is tight, I'd prioritise finishing
+bakeoff round 2 before another LM-fusion sweep — the acoustic-model gap on lin/sna now matters
+roughly 5x more than it did against the withdrawn mix, where lug (already our strongest language)
+dominated everything.
+
+**Also hardened against this happening silently again.** `WAXAL_LANG_MAP` in
+`03_decode_and_submit.py` now hard-fails if a named map covers under half the unlabelled clips,
+instead of printing "routed 0" and falling through to the LID — that silent fallthrough is
+structurally the same bug that produced 0.4919 the first time. Committed with the corrected map;
+see commit `6e34280`.
+
+Files updated and pushed: `data/zindi/Test_phase2.csv` (corrected), `data/routing/
+lang_map_okwija_phase2.json` (corrected mix above), old maps parked in
+`data/routing/withdrawn-phase2-2026-08-02/` with a README rather than deleted.
+
+Still running: `waxal-lineup-lm` (the KenLM fusion DEV measurement — unaffected by any of this,
+since DEV never touches phase-2 audio). Will fold its number in once it lands, then queue a real
+submission run against the corrected mix.
