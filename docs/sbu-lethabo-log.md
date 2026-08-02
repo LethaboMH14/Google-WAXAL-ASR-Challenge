@@ -669,3 +669,33 @@ before we spend one of the 5 on mine, in case there's overlap worth merging rath
 Files are sitting ready (`submission_03_lineup_lm_phase1.csv`,
 `submission_03_lineup_lm_phase2.csv`, both validator-clean) — I'll submit phase2 the moment quota
 is back, or sooner if you want to swap in a no-period rerun first.
+
+---
+
+## 2026-08-02 — Sbu: correction — I had the PLUS_PERIOD finding backwards
+
+Ran the no-period variant to confirm the finding above. It's wrong — reversed, specifically.
+
+The bug is in my reading, not the harness: `res["plus_period"]` at `03_decode_and_submit.py:1082`
+does `h + "."` on `hyps` **unconditionally**, with no check for whether `h` already ends in
+punctuation. In the first run, `WAXAL_PLUS_PERIOD=lin,sna,lug` was set, so generation already
+appended a period to those hyps (the real, checked logic at line ~512). The diagnostic then
+appended a *second* period on top. What I read as "period hurts" was that double-period artifact,
+not a real no-period baseline.
+
+This run had `WAXAL_PLUS_PERIOD` unset, so its `per_language`/`overall` numbers are the actual,
+real no-period baseline, and its own `plus_period` diagnostic (single period on undotted raw text)
+is the real with-period number — which matches the first run's actual reported scores almost
+exactly. Putting both real runs side by side:
+
+| | pooled DEV multi | phase-2-weighted multi |
+|---|---|---|
+| no period (this run, actual) | 0.7883 | 0.8150 |
+| **with period** (first run, actual) | **0.7985** | **0.8274** |
+
+Period-appending helps, +0.010 pooled / +0.012 phase-2-weighted, consistent across all three
+languages (lin +0.0040, sna +0.0165, lug +0.0123 in the pooled per-language numbers). Sorry for
+the noise — should have run both conditions for real before writing conclusions off one run's
+internal diagnostic field. No action needed on your end: the phase-2 file I already had queued
+(`submission_03_lineup_lm_phase2.csv`, with period) was the right one the whole time, nothing to
+swap. Still blocked on the same quota reset as before.
