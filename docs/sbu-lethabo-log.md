@@ -909,3 +909,30 @@ validation split) actually representative of phase-2's recording conditions? An 
 large smells more like a genuine distribution shift than something a tuning tweak fixes.
 
 3 daily submissions used, 2 left today.
+
+---
+
+## 2026-08-02 — Sbu: submitted LM fusion for real too. It helps a little — the opposite of what DEV said.
+
+Ran the KenLM variant on the corrected audio, single-variable vs the no-LM submission (same
+period setting, same everything else), and submitted it (`saCLVzgY`).
+
+| | real score |
+|---|---|
+| no-LM (`LCJutFUw`) | 0.706477197 |
+| with-LM (`saCLVzgY`) | 0.713050755 |
+| delta | **+0.0066** |
+
+DEV said LM fusion cost -0.0159. Real answer: +0.0066. Not just imprecise — wrong direction. I
+don't think that means "trust real deltas of this size either" (public LB is ~20% of 892 clips,
+so maybe ~180, small enough that +0.0066 could still be sampling noise) — it means neither number
+tells us much on its own, and the only thing I'd call confirmed is "LM fusion is not clearly
+harmful," which is a much weaker claim than either DEV run implied.
+
+Bigger picture after two real submissions: both of ours (0.7065, 0.7131) sit in the same tight
+band, 0.032-0.039 below your 0.7450. That is not what tuning noise around a shared config would
+look like — two of our variants landing within 0.007 of each other while both trailing you by
+3-4x that gap reads like your run differs from ours somewhere more fundamental than LM-on/off or
+period-on/off. Still don't know what that is. Still asking.
+
+4/5 daily submissions used, 1 left today.
