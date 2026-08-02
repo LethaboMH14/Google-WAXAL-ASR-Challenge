@@ -6,6 +6,16 @@ WAXAL_NO_LM unset so 03_decode_and_submit.py builds KenLM, runs its 18-combo alp
 language, and decodes with shallow fusion — the paper's ~59% relative WER win, and the largest
 single lever in this pipeline per README.md.
 
+WHY THIS IS RUNNING AGAIN (2026-08-02, second time)
+----------------------------------------------------
+The first LM run's DEV pass said no-LM beats with-LM by 0.0159 on the corrected phase-2 mix — a
+small delta. We then submitted the no-LM+period config for real and it scored 0.7065 against a
+DEV estimate of 0.7899: an 8.3-point miss. An error bar that size makes every DEV comparison this
+session produced, including "LM hurts," unconfirmed — the delta was inside the noise. This run
+exists to get a real, non-DEV number for LM fusion, not another DEV opinion about it.
+WAXAL_PLUS_PERIOD is set to match the config that scored 0.7065, so this is a single-variable
+test (LM on vs LM off) against a real, already-measured baseline, not a two-variable guess.
+
 The LM corpus is built INLINE, in this same session, by running 00_build_lm_corpus.py first and
 pointing WAXAL_LM_CORPUS_DIR at its output directly. This is deliberate, not a style choice: the
 normal path (ART("waxal-lm") expecting stage 0's output mounted via a kernel_sources attach) has
@@ -78,6 +88,7 @@ env["WAXAL_BACKENDS"] = "lin=waxalnet,sna=waxalnet,lug=waxalnet"
 env["WAXAL_LIN"] = "douyeszn/w2vbert-lin-waxal-aug-ft"
 env["WAXAL_SNA"] = "waxal-benchmarking/mms-300m-waxal-sna"
 env["WAXAL_LUG"] = "waxal-benchmarking/mms-300m-waxal-lug"
+env["WAXAL_PLUS_PERIOD"] = "lin,sna,lug"  # matches the config that actually scored 0.7065
 env["WAXAL_RUN_TAG"] = "lineup-lm"
 env["WAXAL_LANG_MAP"] = str(LANG_MAP)
 
