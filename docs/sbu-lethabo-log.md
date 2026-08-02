@@ -699,3 +699,79 @@ the noise — should have run both conditions for real before writing conclusion
 internal diagnostic field. No action needed on your end: the phase-2 file I already had queued
 (`submission_03_lineup_lm_phase2.csv`, with period) was the right one the whole time, nothing to
 swap. Still blocked on the same quota reset as before.
+
+---
+
+## 2026-08-02 — Sbu: STOP. Organisers replaced the phase-2 test set. Everything phase-2 is void.
+
+Read this before you spend another minute or another submission.
+
+Zindi discussion **#34268**, posted by `meganomaly` (Zindi staff) at **13:52 UTC today**:
+
+> "Our team has confirmed that the incorrect Phase 2 test dataset was provided... We are now
+> releasing the corrected Phase 2 test data. Please download the new files and use them for all
+> future submissions. The Phase 2 leaderboard will be updated accordingly. To make up for the lost
+> time, we have extended the challenge deadline by one week."
+
+And in the replies: **"Leaderboard has been reset."**
+
+That reset is why neither of us is on the leaderboard any more — I went looking for our team
+(display name is **`Sown-are`**, not `LethaboMH14`; that tripped me up for a while) across all 9
+pages and we are simply not there. Nor is anyone with our old scores. The top of the board is now
+J0NNY 0.7386 / TAUIL_Abdelilah 0.7368 / wahaym 0.7294, all submitted within the last hour, i.e.
+people are already re-submitting against the new data.
+
+### How bad: the IDs changed, so this is not a re-score, it is a redo
+
+I checked the new archive rather than assuming. New URL is
+`https://storage.googleapis.com/waxalphase2/newaudios.zip`, uploaded 13:43 UTC.
+
+- **the old URL is now a hard 404** — `waxalphase2/audio.zip` is gone, not stale. Any run on the
+  old code now dies at the download instead of quietly scoring against void audio, which is the
+  one lucky part of this.
+- **new archive is 1,086.7 MB vs the old 762.4 MB** — ~42% bigger, so it is genuinely different
+  content, not a re-upload.
+- **the ID space is completely disjoint.** I pulled the zip's central directory with a range
+  request (last 2 MB, no need to download a gigabyte) and parsed the entries: new clips are
+  `newaudios/ID_XXXXXX.wav` with **six** characters after `ID_` (`ID_AAOODF`, `ID_HZRRCJ`,
+  `ID_QSHFNI`...). Our committed `Test_phase2.csv` has **five** (`ID_TBDTM`, `ID_JZFXM`...).
+  Different lengths, so overlap is impossible — not one id carries over.
+
+### What that voids
+
+| artefact | status |
+|---|---|
+| `data/zindi/Test_phase2.csv` (1,500 old ids) | **void** — needs re-downloading from the Data tab |
+| `data/routing/lang_map_okwija_phase2.json` | **void** — keyed on old ids; okwija itself is fine, it just has to be re-run on the new audio |
+| the two `submission_03_lineup*_phase2.csv` I had queued | **void** — never submitted them, so at least we spent nothing |
+| the "phase 2 is ~95% Luganda" finding | **unknown** — that was measured on the wrong audio. Do not assume it holds. |
+
+That last row is the one I would not skip over. The routing overhaul, the okwija adoption, the
+whole "it was never the acoustic models, it was misrouting" diagnosis — all of it was reasoned
+about a phase-2 mix we measured on a test set the organisers have now withdrawn. The *method* is
+still right and the dev-set evidence behind it is untouched. But the specific claim that phase 2
+is overwhelmingly Luganda has to be re-measured before we lean on it again.
+
+### What survives untouched
+
+Everything that never looked at phase-2 audio: the 900-clip dev harness and every DEV number from
+it, the bakeoff rankings and the winning per-language lineup, the LM corpus, the okwija router
+weights, and the phase-1 submission path. Our 0.7985 pooled DEV / lineup selection stands.
+
+### What I have done
+
+- Pushed `03454eb`: `PHASE2_URL` now points at `newaudios.zip`, with a comment explaining why.
+- Left the `waxal-lineup-lm` kernel running. Its DEV pass (RUN 1/2) never touches phase-2 audio,
+  so the KenLM-fusion measurement we actually wanted from it is still valid; its RUN 2/2 phase-2
+  output is throwaway.
+
+### What I need from you
+
+1. **Re-download `Test_phase2.csv`** from the Data tab and commit it — you are the one signed in
+   with the account that has been pulling these. I did not want to guess at the file.
+2. **Re-run the router** on the new audio to regenerate `lang_map_okwija_phase2.json`.
+3. Sanity-check the new phase-2 language mix against the old 95/4/1 claim before we trust it.
+
+Small consolation: the deadline moved out a week, and the board reset wiped the 0.72-0.73 cluster
+that was ahead of us as much as it wiped us. Our lineup is measured and ready; we just have to
+point it at the right audio.
