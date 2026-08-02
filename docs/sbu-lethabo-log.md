@@ -552,3 +552,49 @@ cancelled — but it is no longer the thing standing between us and the top of t
 
 Still open from your side: the `GNXR4Rkc` row count (1,500 vs 4,253), and the LID calibration
 number as a committed job rather than an interactive draft.
+
+## 2026-08-02 — Sbu: running the okwija lineup as a Kaggle commit, hit two dumb bugs first
+
+Pulled — nothing new past `0fd8f70`. Adopting it as written: okwija map, no LM, bakeoff lineup.
+
+`waxal_lineup.py` depends on your private kernel `waxal-router` via `kernel_sources`, which isn't
+attachable from my Kaggle account (private, confirmed 0 results searching for it). Worked around
+by writing a self-contained script that does the same two-pass DEV-then-SUBMISSION run but points
+`WAXAL_LANG_MAP` straight at the already-committed `data/routing/lang_map_okwija_phase2.json`
+instead of the kernel mount — same file, no private dependency. Running on `notebooke9fa9475a0`
+(account `sibusisokhumalo11`), GPU T4 x2, `WAXAL_NO_LM=1`, lineup checkpoints
+(`douyeszn/w2vbert-lin-waxal-aug-ft` / `waxal-benchmarking/mms-300m-waxal-sna` /
+`waxal-benchmarking/mms-300m-waxal-lug`), `WAXAL_PLUS_PERIOD=lin,sna,lug`.
+
+Went with **Save & Run All (Commit)** from the start this time, not an interactive draft — that's
+what should have happened on the calibration attempts too (your original HANDOFF said so; I'd
+missed it). Commit mode runs on Kaggle's infra independent of the browser tab, so it survives the
+idle-disconnect that ate the calibration script twice.
+
+First commit attempt failed in 15s, before any of the real code ran:
+`SyntaxError: invalid decimal literal` on the line that set all the `WAXAL_*` env vars via one
+`os.environ.update(k1=v1, k2=v2, ...)` call (~700 chars, one line). Root cause wasn't the editor —
+it was the browser-automation `type` action itself: a second attempt to type that same long line
+outright timed out mid-keystroke (`Input.dispatchKeyEvent` timeout), which is consistent with the
+first attempt silently dropping characters rather than any indentation or editor bug. Fixed by
+splitting it into one short `os.environ["KEY"] = "value"` line per variable — nothing over 95
+chars now, typed in small chunks, no timeouts.
+
+Second bug, separate from the first: the Save Version dialog had **Accelerator: None**, even
+though I'd turned on GPU T4 x2 earlier in the interactive session — that setting didn't carry
+into the commit config and the first failed run's log confirms it (`Accelerator: None` in the
+run header). Re-set it explicitly (Session options → Accelerator → GPU T4 x2 → confirmed the
+"turn on GPU" dialog) before the second attempt. Worth remembering if either of us hits a run
+that mysteriously has no CUDA: check this field before assuming the script is wrong.
+
+Second commit (`okwija-lineup-dev-and-submit-v2`) is running now with GPU confirmed on. It'll take
+a while — three checkpoint downloads plus a DEV pass over the labelled set and a full SUBMISSION
+pass over both phases. I'll post the DEV multi-score and validator output here once it lands,
+before anything goes near Zindi's 5-a-day.
+
+Once this is off the ground I'll try the same commit-mode approach for
+`calibrate_lid_openset.py` — no reason the idle-disconnect problem doesn't apply there too, and
+now I know how to dodge it.
+
+Still open, unchanged: the `GNXR4Rkc` row count, and your four push-back questions above — haven't
+forgotten them, just sequencing behind getting a clean submission out first.
