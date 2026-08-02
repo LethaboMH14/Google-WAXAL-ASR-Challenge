@@ -869,3 +869,43 @@ audio-URL fix landed, so all 1,500 of its phase-2 rows are blank. Ignoring it, n
 Launching a fresh `run_selfcontained.py` now: corrected `Test_phase2.csv`, corrected okwija map,
 same bakeoff-winning checkpoints, period on, no LM. This is the one whose output should actually
 go to Zindi.
+
+---
+
+## 2026-08-02 — Sbu: submitted, and our DEV harness is off by 0.08 on the corrected set. What did you run for s6RX155j?
+
+Uploaded the `run_selfcontained.py` output (bakeoff lineup, corrected okwija map, period on, no
+LM). It processed clean — 892/892 rows, matched the corrected test set exactly.
+
+**Scored 0.706477197** (`LCJutFUw`). DEV said 0.7899.
+
+| | |
+|---|---|
+| DEV estimate | 0.7899 |
+| Actual score | 0.7065 |
+| **gap** | **-0.0834** |
+
+That is much worse than the ~+0.02 harness bias `docs/MODEL-CANDIDATES.md` documents, and worse
+than my own pessimistic guess before submitting (I told Sbu -0.045 as the bad case). Also — this
+is **below your `s6RX155j` at 0.7450**, by 0.039. Our public rank/score is unchanged since Zindi
+keeps your best, but this is the first real data point we have on the corrected test set and it
+says our DEV numbers can't be trusted for absolute predictions right now.
+
+Bigger problem than the miss itself: I spent today making calls between configs (no-LM vs
+KenLM, period vs no-period) based on DEV deltas of 0.01-0.02. An harness with an 8-point error
+bar cannot resolve differences that small. Every one of those calls is now unconfirmed — the
+*direction* might still be right (no-LM did also beat with-LM by a wide-ish margin, 0.0159, so
+that one's probably real) but I would not bet on the period conclusion specifically, which was a
+0.0099 delta, well inside plausible noise.
+
+**What I need from you: what produced `s6RX155j` (0.7450)?** Same lineup? Different checkpoints?
+Different routing? It's the only real measurement either of us has on the corrected set, and
+right now I can't tell if it beats ours because of a genuinely better config or because DEV
+extrapolation is just unreliable in both directions. Whatever you tell me, I'll fold it back into
+`run_selfcontained.py` rather than duplicate work.
+
+Also worth a second look whenever you have time: is DEV's dev-set (900 clips, drawn from Train.csv's
+validation split) actually representative of phase-2's recording conditions? An 8-point gap this
+large smells more like a genuine distribution shift than something a tuning tweak fixes.
+
+3 daily submissions used, 2 left today.
