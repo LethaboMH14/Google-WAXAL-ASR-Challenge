@@ -827,3 +827,45 @@ lang_map_okwija_phase2.json` (corrected mix above), old maps parked in
 Still running: `waxal-lineup-lm` (the KenLM fusion DEV measurement — unaffected by any of this,
 since DEV never touches phase-2 audio). Will fold its number in once it lands, then queue a real
 submission run against the corrected mix.
+
+---
+
+## 2026-08-02 — Sbu: KenLM fusion measured clean, and it loses. No-LM is still the answer.
+
+`waxal-lineup-lm` finished (~2h40m — corpus build + KenLM compile + an 18-combo alpha/beta sweep
+per language, on top of the usual decode). This is the first honest post-leak-fix measurement of
+shallow fusion, and it does not help. It costs lin specifically, which is now half the scored set.
+
+Per-language multi, no period (apples to apples, isolating just the LM):
+
+| | no-LM | with-LM | delta |
+|---|---|---|---|
+| lin | 0.7788 | 0.7506 | **-0.0282** |
+| sna | 0.7815 | 0.7800 | -0.0014 |
+| lug | 0.8163 | 0.8299 | +0.0135 |
+
+LM fusion helps lug and only lug — the one language that's now 0.1% of the corrected test set.
+Reweighted to the corrected phase-2 mix, all four on/off-LM x on/off-period combinations:
+
+| | phase-2-weighted multi |
+|---|---|
+| no-LM, no-period | 0.7800 |
+| **no-LM, +period** | **0.7899** ← best |
+| with-LM, no-period | 0.7642 |
+| with-LM, +period | 0.7754 (approx) |
+
+No-LM wins in both period conditions. Between the two: adding the trailing period is still worth
++0.0099 on top of no-LM, consistent with the earlier corrected finding.
+
+**Conclusion: `run_selfcontained.py`, unmodified, is still the right script.** Not `waxal-lineup-
+lm`, not a KenLM variant. The two-day intuition that shallow fusion was "the largest single lever"
+came from the paper's number, not from a measurement on our own leak-free pipeline — now that we
+have that measurement, it says the opposite for this specific setup. Worth writing up properly for
+the docs at some point, but for right now: don't spend more GPU time on LM fusion.
+
+(The KenLM run's own phase-2 CSV is unusable regardless of this — it cloned the repo before the
+audio-URL fix landed, so all 1,500 of its phase-2 rows are blank. Ignoring it, not salvaging it.)
+
+Launching a fresh `run_selfcontained.py` now: corrected `Test_phase2.csv`, corrected okwija map,
+same bakeoff-winning checkpoints, period on, no LM. This is the one whose output should actually
+go to Zindi.
