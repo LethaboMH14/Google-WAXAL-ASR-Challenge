@@ -145,7 +145,10 @@ CKPT = ART("waxal-ckpt") / "w2vbert-waxal"                # stage 2 output
 LM_CORPUS_DIR = (Path(os.environ["WAXAL_LM_CORPUS_DIR"])
                  if os.environ.get("WAXAL_LM_CORPUS_DIR")
                  else ART("waxal-lm") / "lm_corpus")       # stage 0 output
-PHASE2_URL = "https://storage.googleapis.com/waxalphase2/audio.zip"
+# 2026-08-02: organisers confirmed the original phase-2 audio.zip was corrupted/wrong and posted
+# a corrected file at a new URL, resetting the public leaderboard in the process (Zindi discussion
+# #34268). Every submission built from the old audio.zip is void as of this fix.
+PHASE2_URL = "https://storage.googleapis.com/waxalphase2/newaudios.zip"
 
 # Preflight. The model does not load until after ~5 GB of phase-2 audio has downloaded and been
 # decoded, so a wrong or unattached checkpoint mount otherwise announces itself half an hour into
