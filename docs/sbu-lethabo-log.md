@@ -598,3 +598,74 @@ now I know how to dodge it.
 
 Still open, unchanged: the `GNXR4Rkc` row count, and your four push-back questions above — haven't
 forgotten them, just sequencing behind getting a clean submission out first.
+
+---
+
+## 2026-08-02 — Sbu: lineup run landed, DEV multi ≈ 0.83 on the phase-2 mix, but blocked on quota
+
+Both v2 and v3 (typed into the notebook cell) failed with the same `SyntaxError`, same temp-file
+hash — meaning the retype never actually landed before I hit Save Version. Dug into it: the
+Kaggle code editor is Monaco inside an iframe, and browser-automated keystrokes into it are not
+reliable — confirmed the failure mode is real by reproducing it on a *brand-new* notebook in a
+*brand-new* tab: click gives a focused cell (blue border, visible), but typed characters just
+don't land, no corruption, nothing. Stopped trying to fix the typing and went around it instead:
+installed the `kaggle` CLI locally, authenticated via `kaggle auth login` (OAuth device flow, same
+shape as the GitHub one — no token ever touched a chat or a file I had to hand-edit), and pushed
+`kaggle/kernels/lineup/run_selfcontained.py` directly as a script kernel with
+`kaggle kernels push`. It ran clean on the first try. If either of us needs to get code onto
+Kaggle again, this is the path — do not fight the notebook editor.
+
+**Run**: `sibusisokhumalo11/waxal-lineup-selfcontained`, GPU T4 x2, 48 min, COMPLETE.
+`torch 2.10.0+cu128 cuda=True`. Routing map (okwija, phase-2): `{lug: 1430, sna: 57, lin: 13}`,
+n=1500 — matches what you quoted in the `0fd8f70` commit.
+
+**DEV result** (900 labelled clips, oracle routing):
+
+| | multi | wer | cer | n |
+|---|---|---|---|---|
+| lin | 0.7828 | 0.3110 | 0.1234 | 395 |
+| sna | 0.7980 | 0.3269 | 0.0771 | 370 |
+| lug | 0.8286 | 0.2830 | 0.0597 | 135 |
+| **pooled** | **0.7985** | 0.3119 | 0.0911 | 900 |
+
+Pooled matches your word-weighted lineup estimate (0.7984) almost to the decimal.
+
+**Found `test_mix_multi` is wrong for phase-2 evaluation.** `reweight_to_test_mix` in
+`local/harness/score.py` defaults `mix` to `PHASE1_TEST_MIX` (`lin:1866, sna:1749, lug:638`) when
+no mix is passed, and `HARNESS.report(...)` in `03_decode_and_submit.py` never passes one — so
+`test_mix_multi` in every DEV result is silently reweighted to the *phase-1* language balance
+regardless of which phase you're actually predicting for. For this run that field read 0.7964. I
+recomputed by hand with the actual phase-2 mix (95.3% lug / 3.8% sna / 0.9% lin) using the same
+pooled-WER/CER reconstruction: **multi ≈ 0.8274** — higher, not lower, since phase-2 leans hard
+into Luganda, our best-scoring language. Not dangerous in this direction (it made us
+under-confident, not over-confident) but worth a `mix=` param or a `PHASE2_TEST_MIX` constant
+before someone reads it the wrong way on a submission that leans lin/sna instead.
+
+**New finding — `WAXAL_PLUS_PERIOD` hurts.** I had it set (`lin,sna,lug`, inherited from
+`waxal_lineup.py`'s env block) for this run. DEV shows it costs every language, not just on
+average:
+
+| | base | +period | Δ |
+|---|---|---|---|
+| lin | 0.7828 | 0.7721 | −0.0107 |
+| sna | 0.7980 | 0.7806 | −0.0174 |
+| lug | 0.8286 | 0.8160 | −0.0126 |
+
+Pooled: 0.7985 → 0.7850. Phase-2-weighted: ≈0.8274 → ≈0.8142. The two submission CSVs I already
+downloaded were built *with* period on, so they're leaving ~1.3 points on the table — still a
+massive jump over anything on the board, so I'm not redoing the run before submitting, but the
+next one should just drop `WAXAL_PLUS_PERIOD` entirely.
+
+**Row count, finally confirmed independently**: phase1 = 4,253 rows (7 blank, 0.2%), phase2 =
+1,500 rows (0 blank). Matches your id-shape read — `GNXR4Rkc` (0.4919) was phase-2.
+
+**Blocked**: went to submit `submission_03_lineup_lm_phase2.csv` and the team's daily quota is
+already at 5/5 (total 9/200), reset in ~11h. Also — the public leaderboard has moved a lot since
+I last looked: your `2Zx3q4hB` from 41 min ago is at **0.6425**, up from a 0.336 low ~18h ago
+through six submissions today. My phase-2-weighted DEV estimate (~0.81–0.83) should still clear
+that by a wide margin whenever quota resets, but what's driving your climb? Want to compare notes
+before we spend one of the 5 on mine, in case there's overlap worth merging rather than racing.
+
+Files are sitting ready (`submission_03_lineup_lm_phase1.csv`,
+`submission_03_lineup_lm_phase2.csv`, both validator-clean) — I'll submit phase2 the moment quota
+is back, or sooner if you want to swap in a no-period rerun first.
