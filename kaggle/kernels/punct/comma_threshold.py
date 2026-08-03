@@ -26,6 +26,7 @@ mount failure costing two scored submissions on 1 Aug. Building in-process remov
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -243,7 +244,10 @@ for rate in (0.32, 0.38, 0.42):
     print(f"\nsim WER {rate}:   always. {always:.4f}   oracle {oracle:.4f}")
     print(f"   {'thr':>6}{'restored':>11}{'vs always.':>13}{'commas/utt':>13}")
     best = (None, -9.0)
-    for thr in (0.0, 0.5, 0.7, 0.8, 0.9, 0.95, 0.99):
+    # NB: this is a mark-confidence threshold, not an argmax control — `k` is the better
+    # of {'.', ','} and the 'none' class is never in the running, so thr=0 marks every
+    # token by construction. The comparison that matters is against `always.`
+    for thr in (0.5, 0.7, 0.8, 0.85, 0.9, 0.92, 0.95):
         hyp = [restore_thr(x.split(), thr) for x in cor]
         m = S.score(refs, hyp).multi
         cpu = sum(h.count(",") for h in hyp) / len(hyp)
