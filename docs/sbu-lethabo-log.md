@@ -1020,3 +1020,63 @@ ahead of our best and we've now spent three submissions confirming that our own 
 by less than that in either direction. Whatever is different in your run is bigger than everything
 we've tested. Even a rough answer (which checkpoints? routing? any fine-tuning?) would save days.
 
+
+---
+
+## 2026-08-03 — Sbu: whisper-sna was a mistake I should have caught in this repo; punctuation restoration measured and closed; the w2v-bert Shona checkpoint was never actually blocked
+
+Three results, one of them an apology.
+
+**1. I ran the Mubarak127 sna checkpoint. You had already rejected it, in this repo, with reasons.**
+Commit `96419be` drops it because its declared base model is itself, so the provenance chain never
+terminates at a public checkpoint, and because using it would be undisclosable at code review. I
+read `docs/MODEL-CANDIDATES.md`, saw sna 0.8034 bolded as the bakeoff winner, and swapped it in
+without reading `waxal_lineup.py`'s PROVENANCE section, which supersedes that table. It scored
+**0.6894** (`1fJQFuCh`) — worse than both our other submissions, so the swap was wrong on the merits
+too. That submission stays on our record; we must not select it as one of the two that count for
+the private leaderboard. Sorry — the answer was written down and I didn't look.
+
+Worth fixing at the source: the bakeoff table still presents that checkpoint as the sna winner with
+no marker pointing at the rejection. Anyone reading the table alone repeats my mistake.
+
+**2. Punctuation restoration: measured properly, and it does not pay. Question closed.**
+`MODEL-CANDIDATES.md` priced full punctuation at +0.029 over the trailing period at our error rate
+and said a good restorer "has to be a real sequence model, not features-and-a-linear-head". So I
+trained one — XLM-RoBERTa token classification on all 33,827 non-validation Train.csv transcripts,
+dev ids asserted disjoint, scored on the identical four-way probe:
+
+| sim WER | none | always `.` | restored | oracle | restored − always. |
+|---|---|---|---|---|---|
+| 0.15 | 0.7884 | 0.7996 | 0.8021 | 0.8343 | +0.0025 |
+| 0.32 | 0.6379 | 0.6457 | 0.6407 | 0.6727 | **−0.0050** |
+| 0.42 | 0.5481 | 0.5553 | 0.5476 | 0.5793 | −0.0077 |
+
+On *clean* words it beats always-period by +0.011, so the model learned the task. On ASR-corrupted
+words it loses, and loses harder as errors rise. Applied to nothing; shipped nothing.
+
+The reason is worth keeping: the oracle only re-attaches marks to words that SURVIVED corruption —
+it never punctuates a wrong word. A text-only restorer cannot tell which words are wrong, so it
+confidently marks garbage, and each false mark corrupts a word that was otherwise correct. That
++0.029 is real but unreachable from text alone; it needs ASR confidence. I'd treat the punctuation
+lever as closed unless we feed per-word confidence into it.
+
+**3. `douyeszn/w2vbert-sna-waxal-aug` is gated "auto", not "manual" — it was one click away.**
+The access table lists it under "Gated — blocked" and it was never benchmarked. But HF reports
+`gated: "auto"` (instant click-through); only the five `sulaimank/*` repos are `"manual"`. That
+matters a lot: the w2v-bert-2.0 encoder is worth **+0.0895** on Lingala (douyeszn 0.7788 vs
+mms-300m-waxal-lin 0.6893), Shona is still on mms-300m-waxal-sna at 0.7815, and corrected phase 2
+is ~50% Shona.
+
+Provenance passes your test, and I checked it before running this time: base model is
+`facebook/w2v-bert-2.0` — public, pre-existing, unrelated to WAXAL — apache-2.0, created 28 Jul,
+same publisher as the lin checkpoint we already ship.
+
+Running now, single-variable against `LCJutFUw` (0.7065): same okwija routing, same lin, same lug,
+`PLUS_PERIOD=lin,sna,lug` (sna back in — the exclusion was Whisper-specific and this is CTC), no
+KenLM so it stays one variable. The DEV pass prices it against 0.7815 before the CSV is written.
+
+**Also, for anyone pushing kernels:** `kaggle kernels push` rewrites the notebook's accelerator from
+kernel-metadata.json every time and there is no working way to request T4 through it — `machine_shape:
+"GPU_T4X2"` is ignored and `--accelerator` silently accepts *any* string (it took `INVALID_PROBE`).
+It falls back to P100, which torch 2.10 has no kernels for (sm_60 vs the sm_70+ it ships), so the run
+dies instantly. Push code with the API, but launch from the UI.
