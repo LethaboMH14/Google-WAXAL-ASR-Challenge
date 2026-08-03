@@ -68,7 +68,11 @@ if not REPO.exists():
 print("repo at", subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
                                 capture_output=True, text=True).stdout.strip())
 
-sh([sys.executable, "-m", "pip", "install", "-q", "transformers", "jiwer", "accelerate"])
+# Match the environment the lineup kernels already run in. Installing transformers/accelerate
+# bare pulls whatever resolves against the preinstalled torch, and requirements-gpu.txt is the
+# pinned set those runs proved out.
+sh([sys.executable, "-m", "pip", "install", "-q", "-r", str(REPO / "requirements-gpu.txt")])
+sh([sys.executable, "-m", "pip", "install", "-q", "jiwer"])
 
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
@@ -86,7 +90,20 @@ from punct_probe import PUNCT, TRAILING, strip_punct, to_labels  # noqa: E402
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"torch {torch.__version__}  cuda={torch.cuda.is_available()}")
 if DEVICE != "cuda":
-    raise SystemExit("no CUDA — set the kernel accelerator to GPU T4 before running")
+    raise SystemExit("no CUDA — set the kernel accelerator to GPU T4 x2 before running")
+
+# Fail here, loudly, rather than 100 steps into training. Version 1 of this kernel died with
+# "CUDA error: no kernel image is available for execution on the device": Kaggle handed it a GPU
+# whose compute capability the installed torch has no compiled kernels for, which is a property
+# of the accelerator the notebook is set to, not of this code. torch 2.10 ships sm_75 and up, so
+# a P100 (sm_60) fails while a T4 (sm_75) works.
+_cap = torch.cuda.get_device_capability()
+print(f"gpu: {torch.cuda.get_device_name(0)}  sm_{_cap[0]}{_cap[1]}  "
+      f"torch arch list: {torch.cuda.get_arch_list()}")
+if f"sm_{_cap[0]}{_cap[1]}" not in torch.cuda.get_arch_list():
+    raise SystemExit(
+        f"this torch has no kernels for sm_{_cap[0]}{_cap[1]} — switch the notebook accelerator "
+        f"to GPU T4 x2 (sm_75) and re-run; nothing below would work on this device")
 torch.manual_seed(SEED)
 
 # ---------------------------------------------------------------- data, with the leak guard
