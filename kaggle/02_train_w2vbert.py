@@ -132,7 +132,12 @@ if _want:
         raise SystemExit(f"WAXAL_LANGS={_want} names unknown languages {_unknown}")
     _tot = sum(LANG_WEIGHTS[x] for x in _want)
     LANG_WEIGHTS = {x: LANG_WEIGHTS[x] / _tot for x in _want}
-    print(f"WAXAL_LANGS -> {_want} only, renormalised weights {LANG_WEIGHTS}")
+    # HF_CONFIGS must be narrowed in step with LANG_WEIGHTS: build() iterates HF_CONFIGS and looks
+    # the weight up per language, so filtering only the weights raises KeyError on the first
+    # language that was dropped. Both are the language set; they cannot disagree.
+    HF_CONFIGS = {k: v for k, v in HF_CONFIGS.items() if k in _want}
+    print(f"WAXAL_LANGS -> {_want} only, renormalised weights {LANG_WEIGHTS}, "
+          f"configs {list(HF_CONFIGS)}")
 
 MAX_SECONDS = 20.0          # clips run 3-67s; >20s blows T4 VRAM and adds little
 MIN_SECONDS = 1.0
