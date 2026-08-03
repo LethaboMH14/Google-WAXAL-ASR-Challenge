@@ -13,14 +13,24 @@ browser-automated typing into Kaggle's Monaco-in-iframe editor proved unreliable
 on a fresh notebook: the cell shows focus but keystrokes don't land), so this runs as a plain
 script kernel instead.
 
-WAXAL_PLUS_PERIOD="lin,sna,lug" and WAXAL_NO_LM="1" are both deliberate, not defaults. Measured
-2026-08-02 across four combinations (LM on/off x period on/off) reweighted to the CORRECTED
-phase-2 mix (lin 50.0% / sna 49.9% / lug 0.1% — see that day's log entries for how this differs
-from the withdrawn set): no-LM beats with-LM in both period conditions (0.7899 vs 0.7754 with
-period on; 0.7800 vs 0.7642 with period off), and period-on beats period-off in both LM
-conditions. no-LM + period is the best of the four at 0.7899. Do not "fix" either of these
-without a fresh measurement — an earlier version of this file had the opposite belief about
-period, from misreading a diagnostic field that double-counted it.
+THE LINEUP (2026-08-03): mixed-architecture, per docs/MODEL-CANDIDATES.md's measured bakeoff.
+
+  lin -> douyeszn/w2vbert-lin-waxal-aug-ft      waxalnet (CTC)      +period YES  (0.7788)
+  sna -> Mubarak127/waxal-whisper-large-v3-sna  whisper (seq2seq)   +period NO   (0.8034)
+  lug -> waxal-benchmarking/mms-300m-waxal-lug  waxalnet (CTC)      +period YES  (0.8286)
+
+sna moved off mms-300m (0.7815) onto the whisper checkpoint (0.8034) because the corrected phase-2
+set is ~50% sna — the bakeoff picked whisper for sna all along, but it was passed over while phase 2
+still looked 95% Luganda. That premise died with the test-set replacement.
+
+WAXAL_PLUS_PERIOD deliberately EXCLUDES sna. The period is per-language: +0.0040 lin, +0.0123 lug,
+but -0.0181 on sna, because whisper already emits punctuation and appending another period
+double-punctuates it. Adding sna back here silently gives most of the whisper gain straight back.
+
+WAXAL_NO_LM=1 stays. KenLM fusion measured +0.0066 on a real submission, but it is a CTC
+beam-search mechanism (pyctcdecode) and does not apply to the seq2seq whisper path, so with sna on
+whisper it would only touch lin/lug. Worth re-testing separately; not bundled into this run, so
+this stays a single-variable change against the 0.7065 no-LM submission.
 """
 
 import json
@@ -66,28 +76,28 @@ env["PYTHONUNBUFFERED"] = "1"
 env["CUDA_VISIBLE_DEVICES"] = "0"
 env["WAXAL_NO_LM"] = "1"
 env["WAXAL_BACKEND"] = "waxalnet"
-env["WAXAL_BACKENDS"] = "lin=waxalnet,sna=waxalnet,lug=waxalnet"
+env["WAXAL_BACKENDS"] = "lin=waxalnet,sna=whisper,lug=waxalnet"
 env["WAXAL_LIN"] = "douyeszn/w2vbert-lin-waxal-aug-ft"
-env["WAXAL_SNA"] = "waxal-benchmarking/mms-300m-waxal-sna"
+env["WAXAL_SNA"] = "Mubarak127/waxal-whisper-large-v3-sna_asr"
 env["WAXAL_LUG"] = "waxal-benchmarking/mms-300m-waxal-lug"
-env["WAXAL_PLUS_PERIOD"] = "lin,sna,lug"
-env["WAXAL_RUN_TAG"] = "lineup"
+env["WAXAL_PLUS_PERIOD"] = "lin,lug"  # NOT sna: whisper punctuates natively, +period is -0.0181 there
+env["WAXAL_RUN_TAG"] = "lineup-whispersna"
 env["WAXAL_LANG_MAP"] = str(LANG_MAP)
 
 dev_env = dict(env, WAXAL_DEV="1")
 print("\n=== RUN 1/2: DEV ===")
 sh([sys.executable, str(REPO / "kaggle" / "03_decode_and_submit.py")], env=dev_env)
 
-dev_path = WORKING / "dev_result_lineup.json"
+dev_path = WORKING / "dev_result_lineup-whispersna.json"
 if dev_path.exists():
     print("DEV RESULT:", json.load(open(dev_path)))
 else:
-    print("DEV RESULT: (no dev_result_lineup.json written — check the run above)")
+    print("DEV RESULT: (no dev_result_lineup-whispersna.json written — check the run above)")
 
 print("\n=== RUN 2/2: SUBMISSION ===")
 sh([sys.executable, str(REPO / "kaggle" / "03_decode_and_submit.py")], env=env)
 
-for name in ("submission_03_lineup_lm_phase1.csv", "submission_03_lineup_lm_phase2.csv"):
+for name in ("submission_03_lineup-whispersna_lm_phase1.csv", "submission_03_lineup-whispersna_lm_phase2.csv"):
     csv = WORKING / name
     if csv.exists():
         sh([sys.executable, str(REPO / "local" / "validate_submission.py"), str(csv)], check=False)
