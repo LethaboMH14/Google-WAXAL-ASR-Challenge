@@ -116,6 +116,24 @@ HF_CONFIGS = {"lin": "lin_asr", "sna": "sna_asr", "lug": "lug_asr"}
 # and would otherwise be the language the shared model quietly gives up on.
 LANG_WEIGHTS = {"lin": 0.42, "sna": 0.34, "lug": 0.24}
 
+# WAXAL_LANGS restricts the sampler to a subset and renormalises what remains, so WAXAL_LANGS=sna
+# trains a Shona-only head without disturbing the multilingual defaults above.
+#
+# The stated case for one shared model is that phase 2 ships no language metadata. That does not
+# bind any more: we route phase 2 with okwija, and its map agrees with EVERY scored submission on
+# 891-892 of 892 clips (verified 3 Aug by recovering each file's implied routing from its own
+# output text). A per-language head therefore has an accurate router to sit behind. Corrected
+# phase 2 is ~50% Shona, and douyeszn's per-language Shona card reports 0.7945 on a
+# speaker-disjoint split, which is a published number to aim at rather than a guess.
+_want = [x.strip() for x in os.environ.get("WAXAL_LANGS", "").split(",") if x.strip()]
+if _want:
+    _unknown = [x for x in _want if x not in LANG_WEIGHTS]
+    if _unknown:
+        raise SystemExit(f"WAXAL_LANGS={_want} names unknown languages {_unknown}")
+    _tot = sum(LANG_WEIGHTS[x] for x in _want)
+    LANG_WEIGHTS = {x: LANG_WEIGHTS[x] / _tot for x in _want}
+    print(f"WAXAL_LANGS -> {_want} only, renormalised weights {LANG_WEIGHTS}")
+
 MAX_SECONDS = 20.0          # clips run 3-67s; >20s blows T4 VRAM and adds little
 MIN_SECONDS = 1.0
 
@@ -256,7 +274,18 @@ print(f"gpu={torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no
 # Hence: lowercase yes, strip punctuation NO. The apostrophe in particular is orthographic in
 # Luganda (w'ekkubo, ng'atambulira) — 16,337 occurrences in 6,119 utterances — and removing it
 # would corrupt the words themselves, not merely their punctuation.
-LOWERCASE = True
+#
+# CORRECTION, 3 Aug — point 1 above is WRONG about the live grader, and it is measured wrong.
+# Lethabo's submissions 15 and 16 are the SAME TEXT differing only in capitalisation (892/892 rows
+# identical ignoring case; byte counts match) and they scored 0.745030 and 0.745734. If the grader
+# lowercased both sides those numbers would be identical. They differ by +0.000703, so casing is
+# scored and the starter notebook does not match what actually grades submissions.
+#
+# The effect is small but it is free, and it points the other way for training: a model that never
+# emits a capital can never collect it. douyeszn's Shona card likewise keeps "case + punctuation"
+# in the vocab. Default stays True so the multilingual runs already measured are reproducible;
+# set WAXAL_LOWERCASE=0 to train a cased head.
+LOWERCASE = os.environ.get("WAXAL_LOWERCASE", "1") != "0"
 
 # Punctuation the model is expected to emit. Everything measured above ~300 occurrences and
 # genuinely predictable from prosody or orthography.
