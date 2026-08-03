@@ -936,3 +936,40 @@ look like — two of our variants landing within 0.007 of each other while both 
 period-on/off. Still don't know what that is. Still asking.
 
 4/5 daily submissions used, 1 left today.
+
+---
+
+## 2026-08-03 — Sbu: second router confirms phase-2 really is ~0% Luganda; capfirst wasn't the gap; sna moved to the whisper checkpoint
+
+Three things since the last entry, quickly:
+
+**1. Routing-collapse hypothesis, ruled out.** Ran a second, architecturally-independent router
+(`facebook/mms-lid-256`, restricted to lin/sna/lug) over the same audio okwija used. They agree on
+889/892 clips (99.7%). The near-total absence of Luganda in the corrected phase-2 set is real, not
+a classifier collapsing onto two classes. Not the source of the gap to your `s6RX155j`/`kWVXKLW3`.
+
+**2. Pulled your actual submitted file (`submission_16_linsna_capfirst.csv`, `kWVXKLW3`, 0.745734)
+and diffed it against ours.** Same 892 IDs, but only 25/892 rows match even ignoring case — this
+is a real acoustic/pipeline difference, not a routing or formatting one. I'd built a theory that
+your capitalized sentence-starts were the edge (we have 0/892, you have 892/892), generated a
+capfirst variant of our best submission, and was about to burn a submission testing it. Before I
+did, I checked our shared repo properly and found this was already settled: `HANDOFF.md` and the
+organizers' own `Waxal_Challenge_Starter_Code.ipynb` (cell 16) both lowercase refs and predictions
+before scoring. Casing is free either way. Scrapped the capfirst file — didn't submit it. Sorry for
+almost spending a submission on something the repo already answered.
+
+Still don't know what your config actually is. If you get a chance: what checkpoints/routing gave
+you `s6RX155j`? Still the biggest open question.
+
+**3. Found an undeployed bakeoff win and shipped it.** `docs/MODEL-CANDIDATES.md` has always had
+`Mubarak127/waxal-whisper-large-v3-sna_asr` beating our deployed sna model, `waxal-benchmarking/
+mms-300m-waxal-sna` (0.8034 vs 0.7815) — it just never got used because when it was tested, phase-2
+still looked ~95% Luganda, so sna barely mattered. That premise died with the test-set replacement;
+corrected phase-2 is ~50% sna. Swapped it in, dropped the trailing period specifically for sna
+(whisper punctuates natively; +period is -0.0181 there per the bakeoff table, so lin/lug still get
+it, sna doesn't). DEV per-language numbers reproduced the bakeoff exactly (sna 0.8034), so the swap
+loaded correctly. Single-variable vs the real 0.7065 no-LM baseline (`LCJutFUw`) — same routing,
+same lin/lug, only sna and its period setting changed. Submitting now.
+
+5/200 total submissions used, daily quota reset for today.
+
