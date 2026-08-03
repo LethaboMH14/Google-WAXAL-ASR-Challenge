@@ -973,3 +973,50 @@ same lin/lug, only sna and its period setting changed. Submitting now.
 
 5/200 total submissions used, daily quota reset for today.
 
+
+---
+
+## 2026-08-03 — Sbu: whisper-sna scored 0.6894. Third DEV delta to come back wrong. Stop trusting the bakeoff table.
+
+Submitted the whisper-sna lineup (`1fJQFuCh`). **0.689434997** — worse than the no-LM baseline by
+0.0171, and worse than our best (`saCLVzgY`, 0.7131) by 0.0236.
+
+| submission | config | real score |
+|---|---|---|
+| `LCJutFUw` | no-LM, mms-sna, period all | 0.706477 |
+| `saCLVzgY` | with-LM, mms-sna, period all | **0.713051** ← still our best |
+| `1fJQFuCh` | no-LM, whisper-sna, period lin+lug | 0.689435 |
+
+`docs/MODEL-CANDIDATES.md` says whisper-sna beats mms-sna 0.8034 vs 0.7815 (+0.0219). The real
+leaderboard says the opposite. Caveat on attribution: this run changed **two** things — the
+checkpoint AND sna's trailing period (dropped it because the bakeoff measured -0.0181 for period on
+whisper). So it's "whisper-sna *with no sna period* is worse," not cleanly "whisper is worse." Both
+changes came from the same source.
+
+**The pattern that actually matters.** That is now three DEV-derived deltas that came back wrong or
+unconfirmed on real submissions:
+
+| decision | DEV said | real said |
+|---|---|---|
+| KenLM fusion | -0.0159 (hurts) | +0.0066 (helps) |
+| trailing period | +0.0099 | never isolated; unconfirmed |
+| sna checkpoint | +0.0219 (whisper wins) | -0.0171 (whisper loses) |
+
+All three deltas sit in the 0.01-0.02 band. We already knew DEV has an ~8-point absolute bias on
+the corrected set. What this run adds is that the *bakeoff table itself* — which I'd been treating
+as harder evidence than DEV, because it's a documented measurement — is DEV output too, and inherits
+the same error bar. It cannot resolve 0.02. I over-weighted it; that's on me.
+
+**Practical consequence: `docs/MODEL-CANDIDATES.md` should not be used to pick between candidates
+whose measured gap is under ~0.03.** It's still useful for ruling out badly-broken checkpoints. It
+is not useful for fine selection, and every "winner" in it that we haven't confirmed on the real
+leaderboard is unverified.
+
+Reverting to the `saCLVzgY` config (with-LM, mms-300m-sna, period on all three) as our known-best.
+2/5 daily submissions used.
+
+Lethabo — this makes your `kWVXKLW3` config the single most valuable unknown we have. You're 0.032
+ahead of our best and we've now spent three submissions confirming that our own tuning knobs move us
+by less than that in either direction. Whatever is different in your run is bigger than everything
+we've tested. Even a rough answer (which checkpoints? routing? any fine-tuning?) would save days.
+
