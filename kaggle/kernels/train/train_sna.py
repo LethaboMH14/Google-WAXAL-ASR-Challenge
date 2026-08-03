@@ -89,7 +89,7 @@ env = dict(os.environ)
 env["PYTHONUNBUFFERED"] = "1"
 env["WAXAL_LANGS"] = "sna"          # per-language head; okwija routes phase 2 at 99.9%
 env["WAXAL_LOWERCASE"] = "0"        # casing is scored: +0.000703, measured on his 15 vs 16
-env["WAXAL_MAX_STEPS"] = os.environ.get("WAXAL_MAX_STEPS", "2000")
+env["WAXAL_MAX_STEPS"] = os.environ.get("WAXAL_MAX_STEPS", "1600")  # ~8.5h at the 19.2 s/step this box measures; 12h cap
 env["WAXAL_ZINDI_DIR"] = str(REPO / "data" / "zindi")
 
 print(f"\nWAXAL_LANGS={env['WAXAL_LANGS']}  WAXAL_LOWERCASE={env['WAXAL_LOWERCASE']}  "
