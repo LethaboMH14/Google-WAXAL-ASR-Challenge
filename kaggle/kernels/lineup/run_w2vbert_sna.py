@@ -96,18 +96,23 @@ if not token or not token.strip():
 os.environ["HF_TOKEN"] = token.strip()
 os.environ["HUGGING_FACE_HUB_TOKEN"] = token.strip()
 
-from huggingface_hub import model_info  # noqa: E402
+from huggingface_hub import hf_hub_download  # noqa: E402
 
+# Download a real file, not metadata. Version 2 of this kernel used model_info() here, it returned
+# OK, and the run then died on a 403 nine minutes later while loading the same repo. HF serves the
+# metadata of a gated repo to ANYONE — that is why an anonymous curl can read its "gated" field —
+# so model_info proves the repo exists and proves nothing about access. config.json is the first
+# file _wn_load() actually fetches, so fetching it here is the same permission on the same path.
 try:
-    mi = model_info(SNA_MODEL, token=token.strip())
-    print(f"gated-model access OK: {mi.id}  (base_model="
-          f"{(mi.cardData or {}).get('base_model')}, license={(mi.cardData or {}).get('license')})")
+    cfg = hf_hub_download(SNA_MODEL, "config.json", token=token.strip())
+    print(f"gated-model access OK (fetched {cfg})")
 except Exception as e:  # noqa: BLE001
     raise SystemExit(
-        f"cannot access {SNA_MODEL}: {type(e).__name__}: {e}\n"
-        f"  Accept the terms at https://huggingface.co/{SNA_MODEL} with the SAME account the\n"
-        f"  HF_TOKEN belongs to. Gating is per-account, so accepting as one user does not grant\n"
-        f"  a token issued by another.")
+        f"cannot read files from {SNA_MODEL}: {type(e).__name__}: {e}\n"
+        f"  Open https://huggingface.co/{SNA_MODEL} WHILE SIGNED IN and click 'Agree and access\n"
+        f"  repository'. This repo is gated 'auto', so approval is instant — but the click only\n"
+        f"  counts if you are signed in, and gating is per-account: the account that accepts must\n"
+        f"  be the one that issued HF_TOKEN.")
 
 LANG_MAP = REPO / "data" / "routing" / "lang_map_okwija_phase2.json"
 routing = json.load(open(LANG_MAP))
