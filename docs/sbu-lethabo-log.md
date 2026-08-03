@@ -1080,3 +1080,77 @@ kernel-metadata.json every time and there is no working way to request T4 throug
 "GPU_T4X2"` is ignored and `--accelerator` silently accepts *any* string (it took `INVALID_PROBE`).
 It falls back to P100, which torch 2.10 has no kernels for (sm_60 vs the sm_70+ it ships), so the run
 dies instantly. Push code with the API, but launch from the UI.
+
+---
+
+## 2026-08-03 (evening) — Sbu: five hypotheses eliminated, five checkpoints lost, and what the numbers actually say
+
+Long day, mostly negative results, all of them cheap. Writing it up so none of it gets re-run.
+
+**Your submission trail decodes cleanly, and it saved me a lot of guessing.** From the team
+submissions page: 14_af51v2 0.700815, 15_linsna_routed 0.745030, 16_linsna_capfirst 0.745734,
+17_ctc_douyeszn 0.734984, 18_lin16_sna17 0.740833. Two clean single-variable reads fall out:
+
+| change | delta |
+|---|---|
+| your sna -> douyeszn sna (16 vs 18) | **-0.0049** |
+| douyeszn lin -> your lin (17 vs 18) | **+0.0058** |
+
+So douyeszn is worse than whatever 15/16 runs, on BOTH languages. I had spent an hour trying to
+unlock `douyeszn/w2vbert-sna-waxal-aug` (gated) as a breakthrough; your own experiments had already
+priced it. Dead end, dropped.
+
+**Correction: casing is NOT free, and I was wrong to say it was.** 15 -> 16 is byte-for-byte the
+same text with different capitals (892/892 identical ignoring case) and it gained **+0.000703**. So
+the grader does not lowercase, contrary to `Waxal_Challenge_Starter_Code.ipynb` cell 16, which I
+cited on 3 Aug to kill exactly this idea. Your experiment beats my code-reading. Every future file
+should carry sentence-start capitals; ours had literally zero.
+
+**Hypotheses killed, no submissions spent:**
+
+- *Routing.* Recovered each file's implied routing by classifying its OUTPUT TEXT against unigram
+  LMs built from Train.csv (classifier scores 100% on held-in Train rows). Your 14, 15, 16 and all
+  four of ours agree with okwija on 891-892 of 892. Routing is not the gap and never was — "routed"
+  in the 15 filename did not change routing.
+- *Repetition.* Ours duplicates spans, yours does not — except it does, more: repeated-4gram rate
+  0.595% for your 16 vs 0.336% for ours.
+- *Truncation.* MAX_SECONDS=40 loses nothing; the longest phase-2 clip is 35.2s.
+- *Double punctuation.* 2 instances across your 17 and 18 combined.
+
+**Checkpoint roulette: five swaps, five losses.** whisper-sna 0.6894, badrex+misterkissi 0.7139,
+douyeszn 0.7350 (yours). I also ran full ungated bakeoffs for both languages — badrex won sna by
++0.0351 on dev and misterkissi won lin by a wide margin — and the resulting submission scored
+**0.713892**, +0.0008 over our previous best. Dev said +0.05.
+
+**That is the fifth time the dev harness has mispredicted the leaderboard.** It has now been wrong
+in both directions and by up to 0.08 absolute. I am done using it to choose anything; it is a
+smoke test that the right checkpoints loaded, nothing more.
+
+**Punctuation, reopened properly and now closed.** Every system on the team is short of commas:
+2.03/0.13 (your 16), 2.00/0.08 (your 18), 1.50/0.05 (your 17) against 1.77/0.75 in Train.csv —
+~550 word errors, the right ORDER to matter. I had closed this on an argmax result of -0.0050
+without ever sweeping a confidence threshold, which is the direct lever on the precision that
+kills it. Swept properly: at threshold ~0.9 restoration beats "always append one period" by
+**+0.0020 / +0.0012 / +0.0018** at sim WER 0.32 / 0.38 / 0.42. Real and replicated, but small —
+it can only afford 0.05 commas per utterance against the reference's 0.75. Worse, applying it to
+your file strips your existing punctuation and re-adds less than it removed, so the naive version
+degrades 16. An additive-only variant is the correct form and still caps at ~+0.0015.
+
+**KenLM on the open lineup:** dev 0.8378 vs 0.8408 no-LM; the no-LM twin scored 0.713892 real.
+Alpha/beta tuned clean (lin 1.5/3.0, sna 0.5/0.5, lug 0.7/1.5). Lands ~0.72. Not competitive.
+
+**Where this leaves the ceiling.** Everything I can do to an existing file — casing +0.0007,
+commas +0.0015, ROVER over your three systems (unmeasured, +/-0.003) — tops out around 0.750
+against your 0.745734. First place is 0.757995. Post-processing closes about a quarter of that gap.
+
+**So the gap is your models, and I cannot identify them.** `af51` is not on the Hub as far as I can
+find, 15/16 name no model at all, and none of our outputs resemble yours (token-Jaccard 0.72-0.74
+against everything we have built). If you can say what 15/16 actually ran, that is worth more than
+anything else on this list — I have spent a day eliminating alternatives and it is the one thing
+that would move us.
+
+**Two housekeeping items.** `douyeszn/w2vbert-lin-waxal-aug-ft` flipped to gated "manual" today and
+now 401s — the lin checkpoint every one of our earlier submissions used is no longer downloadable,
+and "openly available to everyone" is the rule's test, so it is a compliance question as well as an
+access one. And when we pick the two private-leaderboard submissions, `1fJQFuCh` must not be one:
+it is the Mubarak127 whisper checkpoint you rejected on 1 Aug, and it scored 0.6894 anyway.
