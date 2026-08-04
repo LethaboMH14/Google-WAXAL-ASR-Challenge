@@ -211,26 +211,41 @@ def capfirst(t):
 
 import csv  # noqa: E402
 
-SRC = REPO / "data" / "submissions" / "ours_openlineup_capfirst.csv"
-rows = list(csv.reader(open(SRC, encoding="utf-8")))
-out = []
-for r in rows[1:]:
-    if len(r) < 2:
+# ADDITIVE ONLY. The previous run stripped the pipeline's trailing period and let the model
+# re-decide every mark; at threshold 0.9 it is too conservative to put them back and 51 terminal
+# periods were lost (892 -> 841), while 82.4% of references end in one. Never strip again: keep
+# every mark the file already has and only add marks to words that carry none.
+TARGETS = ["ours_kenlm_capfirst.csv", "best_dedup_commas.csv"]
+
+for name in TARGETS:
+    src = REPO / "data" / "submissions" / name
+    if not src.exists():
+        print(f"!! {name} missing")
         continue
-    # strip the pipeline's appended trailing period so the model decides every mark itself;
-    # the apostrophe is orthographic in these languages and is never touched
-    base = re.sub(r"\s+", " ", re.sub(r"[.,]", "", r[1])).strip()
-    out.append([r[0], capfirst(restore(base.split()))])
+    rows = list(csv.reader(open(src, encoding="utf-8")))
+    out = []
+    for r in rows[1:]:
+        if len(r) < 2:
+            continue
+        words = r[1].split()
+        marked = restore(words).split()      # restore() skips already-punctuated words
+        if len(marked) != len(words):        # never let a length change through
+            marked = words
+        # keep the final word exactly as it was: its terminal punctuation is already correct
+        if marked:
+            marked[-1] = words[-1]
+        out.append([r[0], capfirst(" ".join(marked))])
 
-dst = WORKING / "ours_openlineup_restored.csv"
-with open(dst, "w", newline="", encoding="utf-8") as f:
-    w = csv.writer(f)
-    w.writerow(rows[0])
-    w.writerows(out)
-
-t = [x[1] for x in out]
-n = len(t)
-print(f"\nwrote {dst.name}")
-print(f"  rows {n}   '.'/utt {sum(x.count('.') for x in t)/n:.2f}   ','/utt {sum(x.count(',') for x in t)/n:.2f}")
-print(f"  reference: 1.77 / 0.75")
-sh([sys.executable, str(REPO / "local" / "validate_submission.py"), str(dst)], check=False)
+    dst = WORKING / f"restored_{name}"
+    with open(dst, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(rows[0])
+        w.writerows(out)
+    t = [x[1] for x in out]
+    n = len(t)
+    b = [r[1] for r in rows[1:] if len(r) >= 2]
+    print(f"\n{name} -> restored_{name}")
+    print(f"  '.'/utt {sum(x.count('.') for x in b)/n:.2f} -> {sum(x.count('.') for x in t)/n:.2f}   "
+          f"','/utt {sum(x.count(',') for x in b)/n:.2f} -> {sum(x.count(',') for x in t)/n:.2f}   "
+          f"words {sum(len(x.split()) for x in b)} -> {sum(len(x.split()) for x in t)}")
+    sh([sys.executable, str(REPO / "local" / "validate_submission.py"), str(dst)], check=False)
